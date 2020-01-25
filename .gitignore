@@ -1,0 +1,6 @@
+# credentials
+.env
+*.token
+
+# executable
+budgetbridge
