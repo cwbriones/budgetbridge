@@ -2,18 +2,27 @@ package splitwise
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 )
 
-const (
-	baseApiUrl = "https://secure.splitwise.com/api/v3.0"
+var (
+	baseApiUrl, _ = url.Parse("https://secure.splitwise.com/api/v3.0/")
 )
 
 // Client to the splitwise API.
 type Client struct {
 	*http.Client
+}
+
+type GetExpensesRequest struct {
+	DatedAfter    *time.Time
+	DatedBefore   *time.Time
+	UpdatedAfter  *time.Time
+	UpdatedBefore *time.Time
+	// Limit
+	// Offset
 }
 
 type GetExpensesResponse struct {
@@ -40,6 +49,7 @@ type ExpenseUser struct {
 }
 
 type Expense struct {
+	Id          int           `json:"id"`
 	CreatedAt   time.Time     `json:"created_at"`
 	UpdatedAt   time.Time     `json:"updated_at"`
 	Category    Category      `json:"category"`
@@ -48,14 +58,21 @@ type Expense struct {
 	Users       []ExpenseUser `json:"users"`
 }
 
-func (c *Client) GetExpenses() (response GetExpensesResponse, err error) {
-	err = c.doRequest("get_expenses", &response)
+func (c *Client) GetExpenses(req GetExpensesRequest) (response GetExpensesResponse, err error) {
+	values := make(url.Values)
+	if req.DatedAfter != nil {
+		values.Add("dated_after", req.DatedAfter.Format("2006-01-02"))
+	}
+	err = c.doRequest("get_expenses?"+values.Encode(), &response)
 	return
 }
 
 func (c *Client) doRequest(endpoint string, apiResponse interface{}) error {
-	fullEndpoint := fmt.Sprintf("%s/%s", baseApiUrl, endpoint)
-	res, err := c.Client.Get(fullEndpoint)
+	u, err := baseApiUrl.Parse(endpoint)
+	if err != nil {
+		return err
+	}
+	res, err := c.Client.Get(u.String())
 	if err != nil {
 		return err
 	}

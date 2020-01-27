@@ -1,26 +1,29 @@
 package ynab
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"golang.org/x/oauth2"
+	"io"
 	"net/http"
-	"strings"
+	"net/url"
 	"time"
 )
 
-const (
-	baseApiUrl = "https://api.youneedabudget.com/v1"
+var (
+	baseApiUrl, _ = url.Parse("https://api.youneedabudget.com/v1/")
 )
 
 // Client to the YNAB API.
 type Client struct {
-	HttpClient  http.Client
-	AccessToken string
+	HttpClient *http.Client
 }
 
-type ApiResponse struct {
-	Data  interface{} `json:"data,omitempty"`
-	Error *ApiError   `json:"error,omitempty"`
+func NewClient(ctx context.Context, ts oauth2.TokenSource) *Client {
+	client := oauth2.NewClient(ctx, ts)
+	return &Client{client}
 }
 
 type ApiError struct {
@@ -66,19 +69,44 @@ type CreateTransactionsRequest struct {
 	Transactions []Transaction `json:"transactions"`
 }
 
+type TransactionsResponse struct {
+	Transactions []Transaction `json:"transactions"`
+}
+
+type Date time.Time
+
+func (d *Date) String() string {
+	return time.Time(*d).Format("2006-01-02")
+}
+
+func (d *Date) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	t, err := time.Parse("2006-01-02", s)
+	*d = Date(t)
+	return err
+}
+
+func (d *Date) MarshalJSON() ([]byte, error) {
+	s := time.Time(*d).Format("2006-01-02")
+	return json.Marshal(s)
+}
+
 type Transaction struct {
-	AccountId  string    `json:"account_id"`
-	Date       time.Time `json:"date"`
-	Amount     int       `json:"amount"`
-	PayeeId    string    `json:"payee_id"`
-	PayeeName  string    `json:"payee_name"`
-	CategoryId string    `json:"category_id"`
-	Memo       string    `json:"memo"`
-	ImportId   string    `json:"import_id"`
-	Approved   bool      `json:"approved"`
+	AccountId  string  `json:"account_id"`
+	Date       Date    `json:"date"`
+	Amount     int     `json:"amount"`
+	PayeeId    *string `json:"payee_id,omitempty"`
+	PayeeName  string  `json:"payee_name"`
+	CategoryId *string `json:"category_id,omitempty"`
+	Memo       string  `json:"memo"`
+	ImportId   *string `json:"import_id,omitempty"`
+	Approved   bool    `json:"approved"`
 	// TODO
 	// Cleared
-	// FlagColor
+	FlagColor *string `json:"flag_color,omitempty"`
 }
 
 type AccountsResponse struct {
@@ -106,29 +134,97 @@ type Account struct {
 }
 
 func (c *Client) Budgets() (response BudgetsResponse, err error) {
-	err = c.doRequest(&response, "budgets")
+	req, err := c.newRequest("GET", "budgets", nil)
+	if err != nil {
+		return
+	}
+	err = c.do(req, &response)
 	return
 }
 
 func (c *Client) Accounts(budgetID string) (response AccountsResponse, err error) {
-	err = c.doRequest(&response, "budgets", budgetID, "accounts")
+	u := fmt.Sprintf("budgets/%s/accounts", budgetID)
+	req, err := c.newRequest("GET", u, nil)
+	if err != nil {
+		return
+	}
+	err = c.do(req, &response)
 	return
 }
 
 func (c *Client) Account(budgetID, accountID string) (response AccountResponse, err error) {
-	err = c.doRequest(&response, "budgets", budgetID, "accounts", accountID)
+	u := fmt.Sprintf("budgets/%s/accounts/%s", budgetID, accountID)
+	req, err := c.newRequest("GET", u, nil)
+	if err != nil {
+		return
+	}
+	err = c.do(req, &response)
 	return
 }
 
-func (c *Client) doRequest(response interface{}, path ...string) error {
-	endpoint := strings.Join(path, "/")
-	fullEndpoint := fmt.Sprintf("%s/%s", baseApiUrl, endpoint)
+type TransactionsRequest struct {
+	BudgetID  string
+	AccountID string
+	SinceDate time.Time
+}
 
-	req, err := http.NewRequest(http.MethodGet, fullEndpoint, nil)
-	if err != nil {
-		return err
+func (c *Client) Transactions(request TransactionsRequest) (response TransactionsResponse, err error) {
+	var u string
+	if request.BudgetID == "" {
+		return TransactionsResponse{}, fmt.Errorf("Missing BudgetID")
+	} else if request.AccountID != "" {
+		u = fmt.Sprintf("budgets/%s/accounts/%s/transactions", request.BudgetID, request.AccountID)
+	} else {
+		u = fmt.Sprintf("budgets/%s/transactions", request.BudgetID)
 	}
-	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", c.AccessToken))
+	req, err := c.newRequest("GET", u, &request)
+	if request.SinceDate.Unix() > 0 {
+		qs := make(url.Values)
+		qs.Add("since_date", request.SinceDate.Format("2006-01-02"))
+		req.URL.RawQuery = qs.Encode()
+	}
+	if err != nil {
+		return
+	}
+	err = c.do(req, &response)
+	return
+}
+
+func (c *Client) CreateTransactions(budgetID string, request CreateTransactionsRequest) (response TransactionsResponse, err error) {
+	u := fmt.Sprintf("budgets/%s/transactions", budgetID)
+	req, err := c.newRequest("POST", u, &request)
+	if err != nil {
+		return
+	}
+	err = c.do(req, &response)
+	return
+}
+
+func (c *Client) newRequest(method, path string, body interface{}) (*http.Request, error) {
+	var buf io.ReadWriter
+	if body != nil {
+		buf = &bytes.Buffer{}
+		if err := json.NewEncoder(buf).Encode(body); err != nil {
+			return nil, err
+		}
+	}
+
+	u, err := baseApiUrl.Parse(path)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(method, u.String(), buf)
+	if err != nil {
+		return nil, err
+	}
+	if body != nil {
+		req.Header.Add("Content-Type", "application/json")
+	}
+	return req, nil
+}
+
+func (c *Client) do(req *http.Request, response interface{}) error {
 	res, err := c.HttpClient.Do(req)
 	if err != nil {
 		return err
@@ -136,14 +232,17 @@ func (c *Client) doRequest(response interface{}, path ...string) error {
 	defer res.Body.Close()
 	decoder := json.NewDecoder(res.Body)
 
-	apiResponse := ApiResponse{
+	apiResponse := struct {
+		Data  interface{} `json:"data,omitempty"`
+		Error *ApiError   `json:"error,omitempty"`
+	}{
 		Data: response,
 	}
 	if err := decoder.Decode(&apiResponse); err != nil {
 		return err
 	}
-	// You can't return apiResponse.Error directly because it is a typed nil
 	if apiResponse.Error != nil {
+		// This if-statement is necessary to avoid returning a typed nil
 		return apiResponse.Error
 	}
 	return nil
