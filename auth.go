@@ -1,4 +1,4 @@
-package splitwise
+package main
 
 import (
 	"bufio"
@@ -12,9 +12,13 @@ import (
 	"os"
 	"sync"
 
+	"budgetbridge/splitwise"
+
 	"golang.org/x/oauth2"
 )
 
+// CachingTokenSource implements a TokenSource that writes its token to
+// disk on a successful fetch.
 type CachingTokenSource struct {
 	oauth2.TokenSource
 	Path string
@@ -59,6 +63,17 @@ func (cts *CachingTokenSource) put(token *oauth2.Token) error {
 	return encoder.Encode(token)
 }
 
+func NewSplitwiseConfig(clientKey, clientSecret string) oauth2.Config {
+	return oauth2.Config{
+		ClientID:     clientKey,
+		ClientSecret: clientSecret,
+		Endpoint:     splitwise.Endpoint,
+		RedirectURL:  "http://localhost:4000/auth_redirect",
+	}
+}
+
+// LocalServerTokenSource implements a TokenSource by starting a local server to
+// implement the standard oauth2 flow.
 type LocalServerTokenSource struct {
 	Config oauth2.Config
 }
@@ -72,7 +87,7 @@ func (p *LocalServerTokenSource) Token() (*oauth2.Token, error) {
 	url := p.Config.AuthCodeURL(state, oauth2.AccessTypeOffline)
 	fmt.Printf("Open this URL in the browser to authenticate.\n\n%s\n", url)
 
-	resp, err := waitForCallback(state)
+	resp, err := waitForCallback(":4000", state)
 	if err != nil {
 		return nil, fmt.Errorf("Callback failed: %w", err)
 	}
@@ -80,35 +95,6 @@ func (p *LocalServerTokenSource) Token() (*oauth2.Token, error) {
 		return nil, fmt.Errorf("Callback state mismatch")
 	}
 	return p.Config.Exchange(ctx, resp.Code, oauth2.AccessTypeOffline)
-}
-
-func NewConfig(clientKey, clientSecret string) oauth2.Config {
-	return oauth2.Config{
-		ClientID:     clientKey,
-		ClientSecret: clientSecret,
-		Endpoint: oauth2.Endpoint{
-			AuthURL:  "https://secure.splitwise.com/oauth/authorize",
-			TokenURL: "https://secure.splitwise.com/oauth/token",
-		},
-		RedirectURL: "http://localhost:4000/auth_redirect",
-	}
-}
-
-func NewClient(ctx context.Context, clientKey, clientSecret string) (*Client, error) {
-	config := NewConfig(clientKey, clientSecret)
-	tokenSource := &LocalServerTokenSource{
-		Config: config,
-	}
-	return NewClientWithToken(ctx, config, tokenSource)
-}
-
-func NewClientWithToken(ctx context.Context, config oauth2.Config, tokenSource oauth2.TokenSource) (*Client, error) {
-	token, err := tokenSource.Token()
-	if err != nil {
-		return nil, err
-	}
-	httpClient := config.Client(ctx, token)
-	return &Client{httpClient}, nil
 }
 
 func newState() (string, error) {
@@ -126,7 +112,7 @@ type callbackResponse struct {
 	State string
 }
 
-func waitForCallback(csrfToken string) (resp callbackResponse, err error) {
+func waitForCallback(addr, csrfToken string) (resp callbackResponse, err error) {
 	defer func() {
 		if v := recover(); v != nil {
 			err = fmt.Errorf("Server panicked")
@@ -135,14 +121,14 @@ func waitForCallback(csrfToken string) (resp callbackResponse, err error) {
 	c := make(chan callbackResponse)
 	var once sync.Once
 	server := &http.Server{
-		Addr: ":4000",
+		Addr: addr,
 		Handler: http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
 			code := req.FormValue("code")
 			state := req.FormValue("state")
 			once.Do(func() {
 				c <- callbackResponse{Code: code, State: state}
 			})
-			res.Write([]byte("Go back to your terminal. :)"))
+			res.Write([]byte("✅ Go back to your terminal."))
 		}),
 	}
 	go func() {

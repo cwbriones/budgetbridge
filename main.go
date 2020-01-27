@@ -37,16 +37,15 @@ func main() {
 	checkErr(err)
 
 	ctx := context.Background()
-	authConfig := splitwise.NewConfig(config.Splitwise.ClientKey, config.Splitwise.ClientSecret)
-	tokenSource := splitwise.CachingTokenSource{
-		TokenSource: &splitwise.LocalServerTokenSource{
+
+	authConfig := NewSplitwiseConfig(config.Splitwise.ClientKey, config.Splitwise.ClientSecret)
+
+	splitwiseClient := splitwise.NewClient(ctx, &CachingTokenSource{
+		TokenSource: &LocalServerTokenSource{
 			Config: authConfig,
 		},
 		Path: config.Splitwise.TokenCache,
-	}
-	splitwiseClient, err := splitwise.NewClientWithToken(ctx, authConfig, &tokenSource)
-	checkErr(err)
-
+	})
 	ynabClient := ynab.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{
 		AccessToken: config.AccessToken,
 	}))

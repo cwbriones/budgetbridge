@@ -1,10 +1,13 @@
 package splitwise
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
 	"time"
+
+	"golang.org/x/oauth2"
 )
 
 var (
@@ -14,6 +17,11 @@ var (
 // Client to the splitwise API.
 type Client struct {
 	*http.Client
+}
+
+func NewClient(ctx context.Context, tokenSource oauth2.TokenSource) *Client {
+	httpClient := oauth2.NewClient(ctx, tokenSource)
+	return &Client{httpClient}
 }
 
 type GetExpensesRequest struct {
