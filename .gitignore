@@ -1,5 +1,6 @@
 # credentials
 .env
+config.toml
 *.token
 
 # executable

@@ -1,51 +1,61 @@
 package main
 
 import (
-	"budgetbridge/splitwise"
-	"budgetbridge/ynab"
 	"context"
 	"fmt"
 	"log"
 	"os"
 	"strconv"
 	"strings"
-
 	"time"
 
-	"github.com/joho/godotenv"
+	"github.com/BurntSushi/toml"
 	"golang.org/x/oauth2"
+
+	"budgetbridge/splitwise"
+	"budgetbridge/ynab"
 )
 
+type Config struct {
+	BudgetID     string          `toml:"budget_id"`
+	AccountID    string          `toml:"account_id"`
+	AccessToken  string          `toml:"access_token"`
+	Splitwise    SplitwiseConfig `toml:"splitwise"`
+	LookBackDays int             `toml:"lookback_days"`
+}
+
+type SplitwiseConfig struct {
+	UserID       int    `toml:"user_id"`
+	ClientKey    string `toml:"client_key"`
+	ClientSecret string `toml:"client_secret"`
+	TokenCache   string `toml:"token_cache"`
+}
+
 func main() {
-	err := godotenv.Load()
+	var config Config
+	_, err := toml.DecodeFile("config.toml", &config)
 	checkErr(err)
-	clientKey := getenv("CLIENT_KEY")
-	clientSecret := getenv("CLIENT_SECRET")
-	accountId := getenv("ACCOUNT_ID")
-	budgetId := getenv("BUDGET_ID")
-	userId, _ := strconv.Atoi(getenv("USER_ID"))
 
 	ctx := context.Background()
-	authConfig := splitwise.NewConfig(clientKey, clientSecret)
+	authConfig := splitwise.NewConfig(config.Splitwise.ClientKey, config.Splitwise.ClientSecret)
 	tokenSource := splitwise.CachingTokenSource{
 		TokenSource: &splitwise.LocalServerTokenSource{
 			Config: authConfig,
 		},
-		Path: ".splitwise.token",
+		Path: config.Splitwise.TokenCache,
 	}
 	splitwiseClient, err := splitwise.NewClientWithToken(ctx, authConfig, &tokenSource)
 	checkErr(err)
 
-	ynabToken := getenv("YNAB_TOKEN")
 	ynabClient := ynab.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{
-		AccessToken: ynabToken,
+		AccessToken: config.AccessToken,
 	}))
 
-	// Get the most recent YNAB transaction from the last 30 days
+	// Get the most recent YNAB transactions from the last month
 	res, err := ynabClient.Transactions(ynab.TransactionsRequest{
-		BudgetID:  budgetId,
-		AccountID: accountId,
-		SinceDate: time.Now().AddDate(0, 0, -30),
+		BudgetID:  config.BudgetID,
+		AccountID: config.AccountID,
+		SinceDate: time.Now().AddDate(0, 0, -config.LookBackDays),
 	})
 	checkErr(err)
 
@@ -59,12 +69,8 @@ func main() {
 	})
 	checkErr(err)
 
-	for _, e := range expenses.Expenses {
-		fmt.Printf("%#v\n", e)
-	}
-
 	// Convert to YNAB transactions
-	transactions, err := convert(expenses.Expenses, userId, accountId)
+	transactions, err := convert(expenses.Expenses, config.Splitwise.UserID, config.AccountID)
 	checkErr(err)
 
 	for _, t := range transactions {
@@ -76,18 +82,18 @@ func main() {
 		request := ynab.CreateTransactionsRequest{
 			Transactions: transactions,
 		}
-		res, err = ynabClient.CreateTransactions(budgetId, request)
+		res, err = ynabClient.CreateTransactions(config.BudgetID, request)
 		checkErr(err)
 
 		fmt.Printf("%#v\n", res)
 	}
 }
 
-func convert(expenses []splitwise.Expense, userId int, accountId string) ([]ynab.Transaction, error) {
+func convert(expenses []splitwise.Expense, userID int, accountId string) ([]ynab.Transaction, error) {
 	transactions := make([]ynab.Transaction, 0, len(expenses))
 
 	for _, e := range expenses {
-		user, rest := partionUsers(e.Users, userId)
+		user, rest := partionUsers(e.Users, userID)
 		if len(rest) > 1 {
 			return nil, fmt.Errorf("not implemented: multi-user transactions")
 		}
@@ -128,11 +134,11 @@ func netBalanceToMilliUnits(owed string) (int, error) {
 	return (dollars*100 + cents) * 10, nil
 }
 
-func partionUsers(users []splitwise.ExpenseUser, userId int) (*splitwise.ExpenseUser, []splitwise.ExpenseUser) {
+func partionUsers(users []splitwise.ExpenseUser, userID int) (*splitwise.ExpenseUser, []splitwise.ExpenseUser) {
 	var user *splitwise.ExpenseUser
 	var other []splitwise.ExpenseUser
 	for _, u := range users {
-		if u.UserId == userId {
+		if u.UserId == userID {
 			user = &u
 		} else {
 			other = append(other, u)

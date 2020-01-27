@@ -1,0 +1,13 @@
+account_id = "<Your YNAB Account ID>"
+budget_id = "<Your YNAB Budget ID>"
+access_token = "<YNAB Personal Access Token>"
+# How far back we should look in YNAB for transactions.
+lookback_days = 30
+
+[splitwise]
+user_id = "<Your Splitwise User ID>"
+client_key = "<Splitwise Application Client ID>"
+client_secret = "<Splitwise Application Client Token>"
+
+# This configures the location to store the access token after it's fetched.
+token_cache = ".splitwise.token"
