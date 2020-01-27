@@ -132,12 +132,12 @@ func waitForCallback(addr, csrfToken string) (resp callbackResponse, err error) 
 		}),
 	}
 	go func() {
-		err := server.ListenAndServe()
-		if err != nil {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			panic(err)
 		}
 	}()
 	// TODO: Add a timeout
 	resp = <-c
+	err = server.Shutdown(context.TODO())
 	return
 }
