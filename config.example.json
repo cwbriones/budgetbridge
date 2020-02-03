@@ -10,7 +10,12 @@
                 "user_id": 12345,
                 "client_key" : "Splitwise Application Client ID",
                 "client_secret" : "Splitwise Application Client Secret",
-                "token_cache" : ".splitwise.token"
+                "token_cache" : ".splitwise.token",
+                "categories" : {
+                    "Groceries" : {
+                        "name" : "My YNAB Grocery Category"
+                    }
+                }
             }
         }
     }

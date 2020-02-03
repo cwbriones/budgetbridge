@@ -11,8 +11,9 @@ import (
 )
 
 type SplitwiseTransactionProvider struct {
-	userID int
-	client *splitwise.Client
+	userID     int
+	client     *splitwise.Client
+	categories map[string]CategorySpec
 }
 
 type SplitwiseConfig struct {
@@ -20,6 +21,12 @@ type SplitwiseConfig struct {
 	ClientKey    string `json:"client_key"`
 	ClientSecret string `json:"client_secret"`
 	TokenCache   string `json:"token_cache"`
+	Categories   map[string]CategorySpec
+}
+
+type CategorySpec struct {
+	Name string `json:"name"`
+	ID   string `json:"id"`
 }
 
 func (config *SplitwiseConfig) NewProvider(ctx context.Context) (TransactionProvider, error) {
@@ -34,8 +41,9 @@ func (config *SplitwiseConfig) NewProvider(ctx context.Context) (TransactionProv
 		Path: config.TokenCache,
 	})
 	return &SplitwiseTransactionProvider{
-		userID: config.UserID,
-		client: client,
+		userID:     config.UserID,
+		categories: config.Categories,
+		client:     client,
 	}, nil
 }
 
@@ -74,9 +82,48 @@ func (sts *SplitwiseTransactionProvider) Transactions(ctx context.Context, ynabI
 			Date:      ynab.Date(e.CreatedAt.In(time.Local)),
 			ImportId:  &importId,
 		}
+		categoryId, ok := sts.mapCategory(ynabInfo.Categories, e.Category)
+		if ok {
+			transaction.CategoryId = &categoryId
+		}
+
 		transactions = append(transactions, transaction)
 	}
 	return transactions, nil
+}
+
+func (sts *SplitwiseTransactionProvider) mapCategory(
+	ynabCategories []ynab.Category,
+	category splitwise.Category,
+) (string, bool) {
+	ynabCategoriesByName := make(map[string]ynab.Category)
+	ynabCategoriesByID := make(map[string]ynab.Category)
+	for _, c := range ynabCategories {
+		ynabCategoriesByName[c.Name] = c
+		ynabCategoriesByID[c.Id] = c
+	}
+
+	m, ok := sts.categories[category.Name]
+	if !ok {
+		return "", false
+	}
+	if m.ID != "" {
+		ynabCategory, ok := ynabCategoriesByID[m.ID]
+		if !ok {
+			fmt.Printf("[WARNING]: Unknown YNAB category ID '%s' in splitwise mapping", m.ID)
+			return "", false
+		}
+		return ynabCategory.Id, true
+	}
+	if m.Name != "" {
+		ynabCategory, ok := ynabCategoriesByName[m.Name]
+		if !ok {
+			fmt.Printf("[WARNING]: Unknown YNAB category name '%s' in splitwise mapping", m.Name)
+			return "", false
+		}
+		return ynabCategory.Id, true
+	}
+	return "", false
 }
 
 func netBalanceToMilliUnits(owed string) (int, error) {

@@ -93,6 +93,7 @@ type NewProvider interface {
 
 type YnabInfo struct {
 	LastUpdateHint time.Time
+	Categories     []ynab.Category
 }
 
 type TransactionProvider interface {
@@ -119,6 +120,16 @@ func main() {
 		AccessToken: config.AccessToken,
 	}))
 
+	categoriesResponse, err := ynabClient.Categories(ynab.CategoriesRequest{
+		BudgetID: config.BudgetID,
+	})
+	checkErr(err)
+
+	var categories []ynab.Category
+	for _, group := range categoriesResponse.CategoryGroups {
+		categories = append(categories, group.Categories...)
+	}
+
 	var transactions []ynab.Transaction
 	for _, providerConfig := range config.Providers.Map {
 		provider, err := providerConfig.Options.NewProvider(ctx)
@@ -137,6 +148,7 @@ func main() {
 
 		fetched, err := provider.Transactions(ctx, YnabInfo{
 			LastUpdateHint: mostRecentDate,
+			Categories:     categories,
 		})
 		checkErr(err)
 		for i := 0; i < len(fetched); i++ {

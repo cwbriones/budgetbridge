@@ -5,11 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"golang.org/x/oauth2"
 	"io"
 	"net/http"
 	"net/url"
 	"time"
+
+	"golang.org/x/oauth2"
 )
 
 var (
@@ -71,6 +72,40 @@ type CreateTransactionsRequest struct {
 
 type TransactionsResponse struct {
 	Transactions []Transaction `json:"transactions"`
+}
+
+type CategoriesRequest struct {
+	BudgetID string
+}
+
+type CategoriesResponse struct {
+	CategoryGroups []CategoryGroup `json:"category_groups"`
+}
+
+type CategoryGroup struct {
+	Id         string     `json:"id"`
+	Name       string     `json:"name"`
+	Hidden     bool       `json:"hidden"`
+	Deleted    bool       `json:"deleted"`
+	Categories []Category `json:"categories"`
+}
+
+type Category struct {
+	Id                      string `json:"id"`
+	CategoryGroupId         string `json:"category_group_id"`
+	Name                    string `json:"name"`
+	Hidden                  bool   `json:"hidden"`
+	OriginalCategoryGroupId string `json:"original_category_group_id"`
+	Note                    string `json:"note"`
+	Budgeted                int    `json:"budgeted"`
+	Activity                int    `json:"activity"`
+	Balance                 int    `json:"balance"`
+	GoalType                string `json:"goal_type"` // TODO: Make this its own type
+	GoalCreationMonth       string `json:"goal_creation_month"`
+	GoalTarget              int    `json:"goal_target"`
+	GoalTargetMonth         string `json:"goal_target_month"`
+	GoalPercentagComplete   int    `json:"goal_percentag_complete"`
+	Deleted                 bool   `json:"deleted"`
 }
 
 type Date time.Time
@@ -193,6 +228,16 @@ func (c *Client) Transactions(request TransactionsRequest) (response Transaction
 func (c *Client) CreateTransactions(budgetID string, request CreateTransactionsRequest) (response TransactionsResponse, err error) {
 	u := fmt.Sprintf("budgets/%s/transactions", budgetID)
 	req, err := c.newRequest("POST", u, &request)
+	if err != nil {
+		return
+	}
+	err = c.do(req, &response)
+	return
+}
+
+func (c *Client) Categories(request CategoriesRequest) (response CategoriesResponse, err error) {
+	u := fmt.Sprintf("budgets/%s/categories", request.BudgetID)
+	req, err := c.newRequest("GET", u, &request)
 	if err != nil {
 		return
 	}
