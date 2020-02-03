@@ -3,9 +3,11 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"reflect"
 	"time"
 
@@ -17,10 +19,17 @@ import (
 )
 
 type Config struct {
-	BudgetID     string `json:"budget_id"`
-	AccessToken  string `json:"access_token"`
-	LookBackDays int64  `json:"lookback_days"`
-	Providers    Providers
+	BudgetID     string      `json:"budget_id"`
+	AccessToken  string      `json:"access_token"`
+	LookBackDays int64       `json:"lookback_days"`
+	Cache        CacheConfig `json:"cache"`
+	Providers    Providers   `json:"providers"`
+}
+
+type CacheConfig struct {
+	Dir              string `json:"dir"`
+	CreateMissingDir bool   `json:"create_missing_dir"`
+	Categories       bool   `json:"categories"`
 }
 
 type Providers struct {
@@ -100,6 +109,64 @@ type TransactionProvider interface {
 	Transactions(context.Context, YnabInfo) ([]ynab.Transaction, error)
 }
 
+type CategoriesCache struct {
+	client   *ynab.Client
+	budgetID string
+	path     string
+	enabled  bool
+}
+
+func (c *CategoriesCache) Categories() ([]ynab.Category, error) {
+	var categories []ynab.Category
+	if err := c.get(&categories); err == nil {
+		return categories, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	categories, err := c.fetch()
+	if err != nil {
+		return nil, err
+	}
+	if err := c.put(categories); err != nil {
+		return nil, err
+	}
+	return categories, nil
+}
+
+func (c *CategoriesCache) put(v interface{}) error {
+	f, err := os.Create(c.path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	encoder := json.NewEncoder(bufio.NewWriter(f))
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(v)
+}
+
+func (c *CategoriesCache) get(v interface{}) error {
+	f, err := os.Open(c.path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return json.NewDecoder(bufio.NewReader(f)).Decode(v)
+}
+
+func (c *CategoriesCache) fetch() ([]ynab.Category, error) {
+	categoriesResponse, err := c.client.Categories(ynab.CategoriesRequest{
+		BudgetID: c.budgetID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var categories []ynab.Category
+	for _, group := range categoriesResponse.CategoryGroups {
+		categories = append(categories, group.Categories...)
+	}
+	return categories, nil
+}
+
 func main() {
 	f, err := os.Open("config.json")
 	checkErr(err)
@@ -120,15 +187,19 @@ func main() {
 		AccessToken: config.AccessToken,
 	}))
 
-	categoriesResponse, err := ynabClient.Categories(ynab.CategoriesRequest{
-		BudgetID: config.BudgetID,
-	})
-	checkErr(err)
-
-	var categories []ynab.Category
-	for _, group := range categoriesResponse.CategoryGroups {
-		categories = append(categories, group.Categories...)
+	if config.Cache.CreateMissingDir {
+		err = os.MkdirAll(config.Cache.Dir, os.ModePerm)
+		checkErr(err)
 	}
+	categoriesCache := CategoriesCache{
+		client:   ynabClient,
+		budgetID: config.BudgetID,
+		enabled:  true,
+		path:     filepath.Join(config.Cache.Dir, "categories"),
+	}
+
+	categories, err := categoriesCache.Categories()
+	checkErr(err)
 
 	var transactions []ynab.Transaction
 	for _, providerConfig := range config.Providers.Map {
