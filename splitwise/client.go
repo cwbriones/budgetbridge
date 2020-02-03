@@ -60,6 +60,7 @@ type Expense struct {
 	Id          int           `json:"id"`
 	CreatedAt   time.Time     `json:"created_at"`
 	UpdatedAt   time.Time     `json:"updated_at"`
+	DeletedAt   *time.Time    `json:"deleted_at"`
 	Category    Category      `json:"category"`
 	Cost        string        `json:"cost"`
 	Description string        `json:"description"`

@@ -50,9 +50,11 @@ func (sts *SplitwiseTransactionProvider) Transactions(ctx context.Context, ynabI
 	if err != nil {
 		return nil, err
 	}
-	transactions := make([]ynab.Transaction, 0, len(res.Expenses))
-
+	var transactions []ynab.Transaction
 	for _, e := range res.Expenses {
+		if e.DeletedAt != nil {
+			continue
+		}
 		user, rest := partionUsers(e.Users, sts.userID)
 		if len(rest) > 1 {
 			return nil, fmt.Errorf("not implemented: multi-user transactions")
@@ -89,6 +91,9 @@ func netBalanceToMilliUnits(owed string) (int, error) {
 	cents, err := strconv.Atoi(split[1])
 	if err != nil {
 		return 0, err
+	}
+	if dollars < 0 {
+		cents *= -1
 	}
 	return (dollars*100 + cents) * 10, nil
 }
