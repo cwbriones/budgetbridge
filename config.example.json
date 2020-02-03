@@ -1,0 +1,17 @@
+{
+    "budget_id" : "YNAB Budget ID",
+    "access_token" : "YNAB Personal Access Token",
+    "providers" : {
+        "splitwise" : {
+            "account_id" : "YNAB Account ID to import into",
+            "lookback_days" : 30,
+            "last_update_hint" : true,
+            "options" : {
+                "user_id": 12345,
+                "client_key" : "Splitwise Application Client ID",
+                "client_secret" : "Splitwise Application Client Secret",
+                "token_cache" : ".splitwise.token"
+            }
+        }
+    }
+}

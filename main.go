@@ -1,161 +1,171 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
 	"os"
-	"strconv"
-	"strings"
+	"reflect"
 	"time"
 
-	"github.com/BurntSushi/toml"
-	"golang.org/x/oauth2"
+	"encoding/json"
 
-	"budgetbridge/splitwise"
 	"budgetbridge/ynab"
+
+	"golang.org/x/oauth2"
 )
 
 type Config struct {
-	BudgetID     string          `toml:"budget_id"`
-	AccountID    string          `toml:"account_id"`
-	AccessToken  string          `toml:"access_token"`
-	Splitwise    SplitwiseConfig `toml:"splitwise"`
-	LookBackDays int             `toml:"lookback_days"`
+	BudgetID     string `json:"budget_id"`
+	AccessToken  string `json:"access_token"`
+	LookBackDays int64  `json:"lookback_days"`
+	Providers    Providers
 }
 
-type SplitwiseConfig struct {
-	UserID       int    `toml:"user_id"`
-	ClientKey    string `toml:"client_key"`
-	ClientSecret string `toml:"client_secret"`
-	TokenCache   string `toml:"token_cache"`
+type Providers struct {
+	Map      map[string]ProviderConfig
+	registry map[string]reflect.Type
+}
+
+func (pm *Providers) SetRegistry(registry map[string]NewProvider) error {
+	for k, v := range registry {
+		if err := pm.Register(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (pm *Providers) Register(name string, v NewProvider) error {
+	if pm.registry == nil {
+		pm.registry = make(map[string]reflect.Type)
+	}
+	_, ok := pm.registry[name]
+	if ok {
+		return fmt.Errorf("The name '%s' is already registered", name)
+	}
+	pm.registry[name] = reflect.TypeOf(v)
+	return nil
+}
+
+func (pm *Providers) UnmarshalJSON(bytes []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(bytes, &raw); err != nil {
+		return err
+	}
+	pm.Map = make(map[string]ProviderConfig, len(raw))
+	for k, v := range raw {
+		var providerConfig ProviderConfig
+
+		rt, ok := pm.registry[k]
+		if !ok {
+			return fmt.Errorf("Unknown provider '%s'", k)
+		}
+
+		p := reflect.New(rt).Elem()
+		if p.Kind() == reflect.Ptr {
+			// initialize the pointer to a valid struct
+			rs := reflect.New(p.Type().Elem())
+			p.Set(rs)
+		}
+		// safety: This type assertion should always succeed since the type is provided
+		// via the `Register` or `SetRegistry` methods.
+		providerConfig.Options = p.Interface().(NewProvider)
+
+		if err := json.Unmarshal(v, &providerConfig); err != nil {
+			return err
+		}
+		pm.Map[k] = providerConfig
+	}
+	return nil
+}
+
+type ProviderConfig struct {
+	AccountID      string `json:"account_id"`
+	LastUpdateHint bool   `json:"last_update_hint"`
+	Options        NewProvider
+}
+
+type NewProvider interface {
+	NewProvider(context.Context) (TransactionProvider, error)
+}
+
+type YnabInfo struct {
+	LastUpdateHint time.Time
+}
+
+type TransactionProvider interface {
+	Transactions(context.Context, YnabInfo) ([]ynab.Transaction, error)
 }
 
 func main() {
+	f, err := os.Open("config.json")
+	checkErr(err)
+	defer f.Close()
+
 	var config Config
-	_, err := toml.DecodeFile("config.toml", &config)
+	err = config.Providers.SetRegistry(map[string]NewProvider{
+		"splitwise": &SplitwiseConfig{},
+	})
+	checkErr(err)
+
+	err = json.NewDecoder(bufio.NewReader(f)).Decode(&config)
 	checkErr(err)
 
 	ctx := context.Background()
 
-	authConfig := NewSplitwiseConfig(config.Splitwise.ClientKey, config.Splitwise.ClientSecret)
-
-	splitwiseClient := splitwise.NewClient(ctx, &CachingTokenSource{
-		TokenSource: &LocalServerTokenSource{
-			Config: authConfig,
-		},
-		Path: config.Splitwise.TokenCache,
-	})
 	ynabClient := ynab.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{
 		AccessToken: config.AccessToken,
 	}))
 
-	// Get the most recent YNAB transactions from the last month
-	res, err := ynabClient.Transactions(ynab.TransactionsRequest{
-		BudgetID:  config.BudgetID,
-		AccountID: config.AccountID,
-		SinceDate: time.Now().AddDate(0, 0, -config.LookBackDays),
-	})
-	checkErr(err)
+	var transactions []ynab.Transaction
+	for _, providerConfig := range config.Providers.Map {
+		provider, err := providerConfig.Options.NewProvider(ctx)
+		checkErr(err)
 
-	// Go up to one week before that
-	mostRecentDate := time.Time(res.Transactions[len(res.Transactions)-1].Date).AddDate(0, 0, -7)
-	fmt.Printf("Fetching up to date %s\n", mostRecentDate.String())
+		// Get the most recent YNAB transactions from this account
+		res, err := ynabClient.Transactions(ynab.TransactionsRequest{
+			BudgetID:  config.BudgetID,
+			AccountID: providerConfig.AccountID,
+			SinceDate: time.Now().AddDate(0, 0, -int(config.LookBackDays)),
+		})
+		checkErr(err)
 
-	// Get all splitwise transactions since this date
-	expenses, err := splitwiseClient.GetExpenses(splitwise.GetExpensesRequest{
-		DatedAfter: &mostRecentDate,
-	})
-	checkErr(err)
+		mostRecentDate := time.Time(res.Transactions[len(res.Transactions)-1].Date)
+		fmt.Printf("Fetching up to date %s\n", mostRecentDate.String())
 
-	// Convert to YNAB transactions
-	transactions, err := convert(expenses.Expenses, config.Splitwise.UserID, config.AccountID)
-	checkErr(err)
-
-	for _, t := range transactions {
-		fmt.Printf("%#v\n", t)
+		fetched, err := provider.Transactions(ctx, YnabInfo{
+			LastUpdateHint: mostRecentDate,
+		})
+		checkErr(err)
+		for i := 0; i < len(fetched); i++ {
+			fetched[i].AccountId = providerConfig.AccountID
+		}
+		transactions = append(transactions, fetched...)
 	}
 
-	// Create
+	for _, t := range transactions {
+		fmt.Printf(
+			"Transaction{Date=%s,\tMemo=%s,\tAmount=%d,\tPayeeName=%s,\tImportId=%s}\n",
+			t.Date.String(),
+			t.Memo,
+			t.Amount,
+			t.PayeeName,
+			*t.ImportId)
+	}
+
 	if len(transactions) > 0 {
 		request := ynab.CreateTransactionsRequest{
 			Transactions: transactions,
 		}
-		res, err = ynabClient.CreateTransactions(config.BudgetID, request)
+		_, err = ynabClient.CreateTransactions(config.BudgetID, request)
 		checkErr(err)
-
-		fmt.Printf("%#v\n", res)
 	}
-}
-
-func convert(expenses []splitwise.Expense, userID int, accountId string) ([]ynab.Transaction, error) {
-	transactions := make([]ynab.Transaction, 0, len(expenses))
-
-	for _, e := range expenses {
-		user, rest := partionUsers(e.Users, userID)
-		if len(rest) > 1 {
-			return nil, fmt.Errorf("not implemented: multi-user transactions")
-		}
-
-		net, err := netBalanceToMilliUnits(user.NetBalance)
-		if err != nil {
-			return nil, err
-		}
-
-		importId := strconv.Itoa(e.Id)
-		transaction := ynab.Transaction{
-			Amount:    -1 * net,
-			PayeeName: rest[0].User.FirstName,
-			AccountId: accountId,
-			Memo:      e.Description,
-			Approved:  false,
-			Date:      ynab.Date(e.CreatedAt.In(time.Local)),
-			ImportId:  &importId,
-		}
-		transactions = append(transactions, transaction)
-	}
-	return transactions, nil
-}
-
-func netBalanceToMilliUnits(owed string) (int, error) {
-	split := strings.Split(owed, ".")
-	if len(split) != 2 {
-		return 0, fmt.Errorf("invalid value")
-	}
-	dollars, err := strconv.Atoi(split[0])
-	if err != nil {
-		return 0, err
-	}
-	cents, err := strconv.Atoi(split[1])
-	if err != nil {
-		return 0, err
-	}
-	return (dollars*100 + cents) * 10, nil
-}
-
-func partionUsers(users []splitwise.ExpenseUser, userID int) (*splitwise.ExpenseUser, []splitwise.ExpenseUser) {
-	var user *splitwise.ExpenseUser
-	var other []splitwise.ExpenseUser
-	for _, u := range users {
-		if u.UserId == userID {
-			user = &u
-		} else {
-			other = append(other, u)
-		}
-	}
-	return user, other
 }
 
 func checkErr(err error) {
 	if err != nil {
 		log.Fatalf("[error]: %s\n", err)
 	}
-}
-
-func getenv(key string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		log.Fatalf("[error]: Missing env var %s", key)
-	}
-	return value
 }
