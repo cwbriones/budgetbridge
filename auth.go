@@ -12,8 +12,6 @@ import (
 	"os"
 	"sync"
 
-	"budgetbridge/splitwise"
-
 	"golang.org/x/oauth2"
 )
 
@@ -61,15 +59,6 @@ func (cts *CachingTokenSource) put(token *oauth2.Token) error {
 
 	encoder := json.NewEncoder(w)
 	return encoder.Encode(token)
-}
-
-func NewSplitwiseConfig(clientKey, clientSecret string) oauth2.Config {
-	return oauth2.Config{
-		ClientID:     clientKey,
-		ClientSecret: clientSecret,
-		Endpoint:     splitwise.Endpoint,
-		RedirectURL:  "http://localhost:4000/auth_redirect",
-	}
 }
 
 // LocalServerTokenSource implements a TokenSource by starting a local server to

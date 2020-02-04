@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/oauth2"
 )
 
 type SplitwiseTransactionProvider struct {
@@ -16,7 +18,7 @@ type SplitwiseTransactionProvider struct {
 	categories map[string]CategorySpec
 }
 
-type SplitwiseConfig struct {
+type SplitwiseOptions struct {
 	UserID       int    `json:"user_id"`
 	ClientKey    string `json:"client_key"`
 	ClientSecret string `json:"client_secret"`
@@ -29,22 +31,31 @@ type CategorySpec struct {
 	ID   string `json:"id"`
 }
 
-func (config *SplitwiseConfig) NewProvider(ctx context.Context) (TransactionProvider, error) {
-	authConfig := NewSplitwiseConfig(
-		config.ClientKey,
-		config.ClientSecret,
+func (options *SplitwiseOptions) NewProvider(ctx context.Context) (TransactionProvider, error) {
+	authConfig := newSplitwiseAuthConfig(
+		options.ClientKey,
+		options.ClientSecret,
 	)
 	client := splitwise.NewClient(ctx, &CachingTokenSource{
 		TokenSource: &LocalServerTokenSource{
 			Config: authConfig,
 		},
-		Path: config.TokenCache,
+		Path: options.TokenCache,
 	})
 	return &SplitwiseTransactionProvider{
-		userID:     config.UserID,
-		categories: config.Categories,
+		userID:     options.UserID,
+		categories: options.Categories,
 		client:     client,
 	}, nil
+}
+
+func newSplitwiseAuthConfig(clientKey, clientSecret string) oauth2.Config {
+	return oauth2.Config{
+		ClientID:     clientKey,
+		ClientSecret: clientSecret,
+		Endpoint:     splitwise.Endpoint,
+		RedirectURL:  "http://localhost:4000/auth_redirect",
+	}
 }
 
 func (sts *SplitwiseTransactionProvider) Transactions(ctx context.Context, ynabInfo YnabInfo) ([]ynab.Transaction, error) {
