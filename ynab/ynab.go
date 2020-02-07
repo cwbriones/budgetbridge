@@ -38,7 +38,8 @@ func (err *ApiError) Error() string {
 }
 
 type BudgetsResponse struct {
-	Budgets []BudgetSummary `json:"budgets"`
+	Budgets       []BudgetSummary `json:"budgets"`
+	DefaultBudget *BudgetSummary  `json:"default_budget"`
 }
 
 type BudgetSummary struct {

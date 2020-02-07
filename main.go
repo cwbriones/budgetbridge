@@ -88,6 +88,23 @@ func (c *CategoriesCache) fetch() ([]ynab.Category, error) {
 	return categories, nil
 }
 
+func getBudgetID(ynabClient *ynab.Client, config Config) (string, error) {
+	if config.BudgetID != nil {
+		return *config.BudgetID, nil
+	}
+	res, err := ynabClient.Budgets()
+	if err != nil {
+		return "", err
+	}
+	if len(res.Budgets) == 1 {
+		return res.Budgets[0].Id, nil
+	}
+	if res.DefaultBudget != nil {
+		return res.DefaultBudget.Id, nil
+	}
+	return "", fmt.Errorf("no default budget available")
+}
+
 func main() {
 	var config Config
 	err := config.Providers.SetRegistry(map[string]NewProvider{
@@ -108,9 +125,11 @@ func main() {
 		err = os.MkdirAll(config.Cache.Dir, os.ModePerm)
 		checkErr(err)
 	}
+	budgetID, err := getBudgetID(ynabClient, config)
+	checkErr(err)
 	categoriesCache := CategoriesCache{
 		client:   ynabClient,
-		budgetID: config.BudgetID,
+		budgetID: budgetID,
 		enabled:  true,
 		path:     filepath.Join(config.Cache.Dir, "categories"),
 	}
@@ -125,7 +144,7 @@ func main() {
 
 		// Get the most recent YNAB transactions from this account
 		res, err := ynabClient.Transactions(ynab.TransactionsRequest{
-			BudgetID:  config.BudgetID,
+			BudgetID:  budgetID,
 			AccountID: providerConfig.AccountID,
 			SinceDate: time.Now().AddDate(0, 0, -int(config.LookBackDays)),
 		})
@@ -159,7 +178,7 @@ func main() {
 		request := ynab.CreateTransactionsRequest{
 			Transactions: transactions,
 		}
-		_, err = ynabClient.CreateTransactions(config.BudgetID, request)
+		_, err = ynabClient.CreateTransactions(budgetID, request)
 		checkErr(err)
 	}
 }

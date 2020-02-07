@@ -37,6 +37,10 @@ type GetExpensesResponse struct {
 	Expenses []Expense `json:"expenses"`
 }
 
+type GetCurrentUserResponse struct {
+	User User `json:"user"`
+}
+
 type Category struct {
 	Id   int    `json:"id"`
 	Name string `json:"name"`
@@ -67,12 +71,17 @@ type Expense struct {
 	Users       []ExpenseUser `json:"users"`
 }
 
-func (c *Client) GetExpenses(req GetExpensesRequest) (response GetExpensesResponse, err error) {
+func (c *Client) GetExpenses(req GetExpensesRequest) (res GetExpensesResponse, err error) {
 	values := make(url.Values)
 	if req.DatedAfter != nil {
 		values.Add("dated_after", req.DatedAfter.Format("2006-01-02"))
 	}
-	err = c.doRequest("get_expenses?"+values.Encode(), &response)
+	err = c.doRequest("get_expenses?"+values.Encode(), &res)
+	return
+}
+
+func (c *Client) GetCurrentUser() (res GetCurrentUserResponse, err error) {
+	err = c.doRequest("get_current_user", &res)
 	return
 }
 

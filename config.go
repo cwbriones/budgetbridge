@@ -9,7 +9,7 @@ import (
 )
 
 type Config struct {
-	BudgetID     string      `json:"budget_id"`
+	BudgetID     *string     `json:"budget_id"`
 	AccessToken  string      `json:"access_token"`
 	LookBackDays int64       `json:"lookback_days"`
 	Cache        CacheConfig `json:"cache"`

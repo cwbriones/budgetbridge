@@ -19,11 +19,11 @@ type SplitwiseTransactionProvider struct {
 }
 
 type SplitwiseOptions struct {
-	UserID       int    `json:"user_id"`
-	ClientKey    string `json:"client_key"`
-	ClientSecret string `json:"client_secret"`
-	TokenCache   string `json:"token_cache"`
-	Categories   map[string]CategorySpec
+	UserID       *int                    `json:"user_id"`
+	ClientKey    string                  `json:"client_key"`
+	ClientSecret string                  `json:"client_secret"`
+	TokenCache   string                  `json:"token_cache"`
+	Categories   map[string]CategorySpec `json:"categories"`
 }
 
 type CategorySpec struct {
@@ -42,8 +42,20 @@ func (options *SplitwiseOptions) NewProvider(ctx context.Context) (TransactionPr
 		},
 		Path: options.TokenCache,
 	})
+
+	var userID int
+	if options.UserID == nil {
+		if res, err := client.GetCurrentUser(); err != nil {
+			return nil, err
+		} else {
+			userID = res.User.Id
+		}
+	} else {
+		userID = *options.UserID
+	}
+
 	return &SplitwiseTransactionProvider{
-		userID:     options.UserID,
+		userID:     userID,
 		categories: options.Categories,
 		client:     client,
 	}, nil
