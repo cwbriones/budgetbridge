@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -105,21 +106,28 @@ func getBudgetID(ynabClient *ynab.Client, config Config) (string, error) {
 	return "", fmt.Errorf("no default budget available")
 }
 
+func newYNABClient(ctx context.Context, accessToken string) *ynab.Client {
+	httpClient := oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{
+		AccessToken: accessToken,
+	}))
+	return ynab.NewClient(httpClient)
+}
+
 func main() {
+	configPath := flag.String("config", "config.json", "the path of your config.json file")
+
 	var config Config
 	err := config.Providers.SetRegistry(map[string]NewProvider{
 		"splitwise": &SplitwiseOptions{},
 	})
 	checkErr(err)
 
-	err = config.load("config.json")
+	err = config.load(*configPath)
 	checkErr(err)
 
 	ctx := context.Background()
 
-	ynabClient := ynab.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{
-		AccessToken: config.AccessToken,
-	}))
+	ynabClient := newYNABClient(ctx, config.AccessToken)
 
 	if config.Cache.CreateMissingDir {
 		err = os.MkdirAll(config.Cache.Dir, os.ModePerm)
@@ -164,22 +172,33 @@ func main() {
 		transactions = append(transactions, fetched...)
 	}
 
-	for _, t := range transactions {
-		fmt.Printf(
-			"Transaction{Date=%s,\tMemo=%s,\tAmount=%d,\tPayeeName=%s,\tImportId=%s}\n",
-			t.Date.String(),
-			t.Memo,
-			t.Amount,
-			t.PayeeName,
-			*t.ImportId)
-	}
-
 	if len(transactions) > 0 {
 		request := ynab.CreateTransactionsRequest{
 			Transactions: transactions,
 		}
-		_, err = ynabClient.CreateTransactions(budgetID, request)
+		res, err := ynabClient.CreateTransactions(budgetID, request)
 		checkErr(err)
+		if len(res.Transactions) > 0 {
+			for _, t := range res.Transactions {
+				importID := "<unset>"
+				if t.ImportId != nil {
+					importID = *t.ImportId
+				}
+				fmt.Printf(
+					"Transaction{Date=%s,Memo=%s,Amount=%d,PayeeName=%s,ImportId=%s}\n",
+					t.Date.String(),
+					t.Memo,
+					t.Amount,
+					t.PayeeName,
+					importID)
+			}
+			fmt.Printf("Created %d transactions.\n", len(res.Transactions))
+		} else {
+			fmt.Printf("No new transactions were created.\n")
+		}
+		if len(res.DuplicateImportIDs) > 0 {
+			fmt.Printf("%d duplicate transaction IDs were ignored.\n", len(res.DuplicateImportIDs))
+		}
 	}
 }
 

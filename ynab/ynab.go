@@ -2,15 +2,12 @@ package ynab
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"time"
-
-	"golang.org/x/oauth2"
 )
 
 var (
@@ -22,8 +19,7 @@ type Client struct {
 	HttpClient *http.Client
 }
 
-func NewClient(ctx context.Context, ts oauth2.TokenSource) *Client {
-	client := oauth2.NewClient(ctx, ts)
+func NewClient(client *http.Client) *Client {
 	return &Client{client}
 }
 
@@ -72,7 +68,8 @@ type CreateTransactionsRequest struct {
 }
 
 type TransactionsResponse struct {
-	Transactions []Transaction `json:"transactions"`
+	Transactions       []Transaction `json:"transactions"`
+	DuplicateImportIDs []string      `json:"duplicate_import_ids"`
 }
 
 type CategoriesRequest struct {

@@ -1,4 +1,4 @@
-package splitwise
+package endpoint
 
 import "golang.org/x/oauth2"
 

@@ -1,13 +1,10 @@
 package splitwise
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
 	"time"
-
-	"golang.org/x/oauth2"
 )
 
 var (
@@ -19,8 +16,7 @@ type Client struct {
 	*http.Client
 }
 
-func NewClient(ctx context.Context, tokenSource oauth2.TokenSource) *Client {
-	httpClient := oauth2.NewClient(ctx, tokenSource)
+func NewClient(httpClient *http.Client) *Client {
 	return &Client{httpClient}
 }
 

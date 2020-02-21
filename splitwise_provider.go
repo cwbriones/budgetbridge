@@ -2,6 +2,7 @@ package main
 
 import (
 	"budgetbridge/splitwise"
+	swEndpoint "budgetbridge/splitwise/endpoint"
 	"budgetbridge/ynab"
 	"context"
 	"fmt"
@@ -31,17 +32,23 @@ type CategorySpec struct {
 	ID   string `json:"id"`
 }
 
-func (options *SplitwiseOptions) NewProvider(ctx context.Context) (TransactionProvider, error) {
-	authConfig := newSplitwiseAuthConfig(
-		options.ClientKey,
-		options.ClientSecret,
-	)
-	client := splitwise.NewClient(ctx, &CachingTokenSource{
+func (options *SplitwiseOptions) newSplitwiseClient(ctx context.Context) *splitwise.Client {
+	httpClient := oauth2.NewClient(ctx, &CachingTokenSource{
 		TokenSource: &LocalServerTokenSource{
-			Config: authConfig,
+			Config: oauth2.Config{
+				ClientID:     options.ClientKey,
+				ClientSecret: options.ClientSecret,
+				Endpoint:     swEndpoint.Endpoint,
+				RedirectURL:  "http://localhost:4000/auth_redirect",
+			},
 		},
 		Path: options.TokenCache,
 	})
+	return splitwise.NewClient(httpClient)
+}
+
+func (options *SplitwiseOptions) NewProvider(ctx context.Context) (TransactionProvider, error) {
+	client := options.newSplitwiseClient(ctx)
 
 	var userID int
 	if options.UserID == nil {
@@ -59,15 +66,6 @@ func (options *SplitwiseOptions) NewProvider(ctx context.Context) (TransactionPr
 		categories: options.Categories,
 		client:     client,
 	}, nil
-}
-
-func newSplitwiseAuthConfig(clientKey, clientSecret string) oauth2.Config {
-	return oauth2.Config{
-		ClientID:     clientKey,
-		ClientSecret: clientSecret,
-		Endpoint:     splitwise.Endpoint,
-		RedirectURL:  "http://localhost:4000/auth_redirect",
-	}
 }
 
 func (sts *SplitwiseTransactionProvider) Transactions(ctx context.Context, ynabInfo YnabInfo) ([]ynab.Transaction, error) {
