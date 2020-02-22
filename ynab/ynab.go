@@ -108,8 +108,12 @@ type Category struct {
 
 type Date time.Time
 
+func (d *Date) Time() time.Time {
+	return time.Time(*d)
+}
+
 func (d *Date) String() string {
-	return time.Time(*d).Format("2006-01-02")
+	return d.Time().Format("2006-01-02")
 }
 
 func (d *Date) UnmarshalJSON(b []byte) error {

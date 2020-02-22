@@ -3,19 +3,18 @@ package main
 import (
 	"bufio"
 	"context"
-	"errors"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"time"
 
-	"encoding/json"
+	"golang.org/x/oauth2"
 
 	"budgetbridge/ynab"
 
-	"golang.org/x/oauth2"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 type NewProvider interface {
@@ -29,64 +28,6 @@ type YnabInfo struct {
 
 type TransactionProvider interface {
 	Transactions(context.Context, YnabInfo) ([]ynab.Transaction, error)
-}
-
-type CategoriesCache struct {
-	client   *ynab.Client
-	budgetID string
-	path     string
-	enabled  bool
-}
-
-func (c *CategoriesCache) Categories() ([]ynab.Category, error) {
-	var categories []ynab.Category
-	if err := c.get(&categories); err == nil {
-		return categories, nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-	categories, err := c.fetch()
-	if err != nil {
-		return nil, err
-	}
-	if err := c.put(categories); err != nil {
-		return nil, err
-	}
-	return categories, nil
-}
-
-func (c *CategoriesCache) put(v interface{}) error {
-	f, err := os.Create(c.path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	encoder := json.NewEncoder(bufio.NewWriter(f))
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(v)
-}
-
-func (c *CategoriesCache) get(v interface{}) error {
-	f, err := os.Open(c.path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return json.NewDecoder(bufio.NewReader(f)).Decode(v)
-}
-
-func (c *CategoriesCache) fetch() ([]ynab.Category, error) {
-	categoriesResponse, err := c.client.Categories(ynab.CategoriesRequest{
-		BudgetID: c.budgetID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	var categories []ynab.Category
-	for _, group := range categoriesResponse.CategoryGroups {
-		categories = append(categories, group.Categories...)
-	}
-	return categories, nil
 }
 
 func getBudgetID(ynabClient *ynab.Client, config Config) (string, error) {
@@ -113,8 +54,23 @@ func newYNABClient(ctx context.Context, accessToken string) *ynab.Client {
 	return ynab.NewClient(httpClient)
 }
 
+func initLogging() func() error {
+	w := bufio.NewWriter(os.Stderr)
+
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	log.Logger = zerolog.
+		New(w).
+		With().
+		Timestamp().
+		Logger()
+
+	return w.Flush
+}
+
 func main() {
 	configPath := flag.String("config", "config.json", "the path of your config.json file")
+	flush := initLogging()
+	defer flush()
 
 	var config Config
 	err := config.Providers.SetRegistry(map[string]NewProvider{
@@ -159,7 +115,7 @@ func main() {
 		checkErr(err)
 
 		mostRecentDate := time.Time(res.Transactions[len(res.Transactions)-1].Date)
-		fmt.Printf("Fetching up to date %s\n", mostRecentDate.String())
+		log.Info().Time("upToDate", mostRecentDate).Msg("fetching transactions")
 
 		fetched, err := provider.Transactions(ctx, YnabInfo{
 			LastUpdateHint: mostRecentDate,
@@ -184,26 +140,28 @@ func main() {
 				if t.ImportId != nil {
 					importID = *t.ImportId
 				}
-				fmt.Printf(
-					"Transaction{Date=%s,Memo=%s,Amount=%d,PayeeName=%s,ImportId=%s}\n",
-					t.Date.String(),
-					t.Memo,
-					t.Amount,
-					t.PayeeName,
-					importID)
+				log.Info().
+					Dict("transaction", zerolog.Dict().
+						Time("date", t.Date.Time()).
+						Str("memo", t.Memo).
+						Int("amount", t.Amount).
+						Str("payeeName", t.PayeeName).
+						Str("importID", importID),
+					).
+					Msg("created transaction")
 			}
-			fmt.Printf("Created %d transactions.\n", len(res.Transactions))
+			log.Info().Int("count", len(res.Transactions)).Msg("transactions successfully created")
 		} else {
-			fmt.Printf("No new transactions were created.\n")
+			log.Info().Msg("no new transactions were created")
 		}
 		if len(res.DuplicateImportIDs) > 0 {
-			fmt.Printf("%d duplicate transaction IDs were ignored.\n", len(res.DuplicateImportIDs))
+			log.Info().Int("count", len(res.DuplicateImportIDs)).Msg("duplicate transaction IDs were ignored.")
 		}
 	}
 }
 
 func checkErr(err error) {
 	if err != nil {
-		log.Fatalf("[error]: %s\n", err)
+		log.Fatal().Err(err)
 	}
 }

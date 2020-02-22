@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"golang.org/x/oauth2"
 )
 
@@ -131,7 +132,9 @@ func (sts *SplitwiseTransactionProvider) mapCategory(
 	if m.ID != "" {
 		ynabCategory, ok := ynabCategoriesByID[m.ID]
 		if !ok {
-			fmt.Printf("[WARNING]: Unknown YNAB category ID '%s' in splitwise mapping", m.ID)
+			log.Warn().
+				Str("categoryID", m.ID).
+				Msg("unknown YNAB category ID in splitwise mapping")
 			return "", false
 		}
 		return ynabCategory.Id, true
@@ -139,7 +142,9 @@ func (sts *SplitwiseTransactionProvider) mapCategory(
 	if m.Name != "" {
 		ynabCategory, ok := ynabCategoriesByName[m.Name]
 		if !ok {
-			fmt.Printf("[WARNING]: Unknown YNAB category name '%s' in splitwise mapping", m.Name)
+			log.Warn().
+				Str("name", m.Name).
+				Msg("unknown YNAB category name in splitwise mapping")
 			return "", false
 		}
 		return ynabCategory.Id, true
