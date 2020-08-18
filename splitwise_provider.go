@@ -168,6 +168,9 @@ func netBalanceToMilliUnits(owed string) (int, error) {
 	if dollars < 0 {
 		cents *= -1
 	}
+	if len(split[1]) == 1 {
+		cents *= 10
+	}
 	return (dollars*100 + cents) * 10, nil
 }
 
