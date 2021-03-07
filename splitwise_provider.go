@@ -59,7 +59,7 @@ func (options *SplitwiseOptions) NewProvider(ctx context.Context) (TransactionPr
 		if res, err := client.GetCurrentUser(); err != nil {
 			return nil, err
 		} else {
-			userID = res.User.Id
+			userID = res.ID
 		}
 	} else {
 		userID = *options.UserID
@@ -98,70 +98,75 @@ func (options *SplitwiseOptions) NewProvider(ctx context.Context) (TransactionPr
 }
 
 func (sts *SplitwiseTransactionProvider) Transactions(ctx context.Context, ynabInfo YnabInfo) ([]ynab.Transaction, error) {
-	// Get all splitwise transactions since this date
-
-	// Go up to one week before hint
 	log.Info().
 		Int("user", sts.userID).
 		Msg("Splitwise Transactions")
+	// Get all splitwise transactions since this date
+	// Go up to one week before hint
 	datedAfter := ynabInfo.LastUpdateHint.AddDate(0, 0, -7)
-	res, err := sts.client.GetExpenses(splitwise.GetExpensesRequest{
+	req := splitwise.GetExpensesRequest{
 		DatedAfter: &datedAfter,
-	})
-	if err != nil {
-		return nil, err
 	}
 	var transactions []ynab.Transaction
-	for _, e := range res.Expenses {
-		if e.DeletedAt != nil {
-			continue
-		}
-		user, rest := partionUsers(e.Users, sts.userID)
-		if len(rest) > 1 {
-			return nil, fmt.Errorf("not implemented: multi-user transactions")
-		}
-		log.Debug().
-			Str("expense", fmt.Sprintf("%+v", e)).
-			Dict("user", zerolog.Dict().
-				Str("NetBalance", user.NetBalance).
-				Str("OwedShare", user.OwedShare).
-				Str("PaidShare", user.PaidShare).
-				Int("UserId", user.UserId).
-				Str("FirstName", user.User.FirstName).
-				Str("LastName", user.User.LastName),
-			).
-			Msg("expense")
-
-		net, err := netBalanceToMilliUnits(user.NetBalance)
+	for {
+		expenses, err := sts.client.GetExpenses(&req)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("get expenses: %s", err)
 		}
-
-		importId := strconv.Itoa(e.Id)
-		transaction := ynab.Transaction{
-			Amount:    net,
-			PayeeName: rest[0].User.FirstName,
-			Memo:      e.Description,
-			Approved:  false,
-			Date:      ynab.Date(e.CreatedAt.In(time.Local)),
-			ImportId:  &importId,
-		}
-		categoryId, ok := sts.mapCategory(ynabInfo.Categories, e.Category)
-		if ok {
+		for _, e := range expenses {
+			if e.DeletedAt != nil {
+				continue
+			}
+			user, rest := partionUsers(e.Users, sts.userID)
+			if len(rest) > 1 {
+				return nil, fmt.Errorf("not implemented: multi-user transactions")
+			}
 			log.Debug().
-				Int("splitwise.category.id", e.Category.Id).
-				Str("splitwise.category.Name", e.Category.Name).
-				Str("ynab.category.id", categoryId).
-				Msg("mapping found")
-			transaction.CategoryId = &categoryId
-		} else {
-			log.Debug().
-				Int("splitwise.category.id", e.Category.Id).
-				Str("splitwise.category.Name", e.Category.Name).
-				Msg("no mapping found for splitwise category")
-		}
+				Str("expense", fmt.Sprintf("%+v", e)).
+				Dict("user", zerolog.Dict().
+					Str("NetBalance", user.NetBalance).
+					Str("OwedShare", user.OwedShare).
+					Str("PaidShare", user.PaidShare).
+					Int("UserId", user.UserID).
+					Str("FirstName", user.User.FirstName).
+					Str("LastName", user.User.LastName),
+				).
+				Msg("expense")
 
-		transactions = append(transactions, transaction)
+			net, err := netBalanceToMilliUnits(user.NetBalance)
+			if err != nil {
+				return nil, err
+			}
+
+			importId := strconv.Itoa(e.ID)
+			transaction := ynab.Transaction{
+				Amount:    net,
+				PayeeName: rest[0].User.FirstName,
+				Memo:      e.Description,
+				Approved:  false,
+				Date:      ynab.Date(e.CreatedAt.In(time.Local)),
+				ImportId:  &importId,
+			}
+			categoryId, ok := sts.mapCategory(ynabInfo.Categories, e.Category)
+			if ok {
+				log.Debug().
+					Int("splitwise.category.id", e.Category.ID).
+					Str("splitwise.category.Name", e.Category.Name).
+					Str("ynab.category.id", categoryId).
+					Msg("mapping found")
+				transaction.CategoryId = &categoryId
+			} else {
+				log.Debug().
+					Int("splitwise.category.id", e.Category.ID).
+					Str("splitwise.category.Name", e.Category.Name).
+					Msg("no mapping found for splitwise category")
+			}
+
+			transactions = append(transactions, transaction)
+		}
+		if len(expenses) == 0 {
+			break
+		}
 	}
 	return transactions, nil
 }
@@ -232,7 +237,7 @@ func partionUsers(users []splitwise.ExpenseUser, userID int) (splitwise.ExpenseU
 	var user splitwise.ExpenseUser
 	var other []splitwise.ExpenseUser
 	for _, u := range users {
-		if u.UserId == userID {
+		if u.UserID == userID {
 			user = u
 		} else {
 			other = append(other, u)

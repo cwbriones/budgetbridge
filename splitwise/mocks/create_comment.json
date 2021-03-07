@@ -1,0 +1,24 @@
+{
+  "comment": {
+      "id": 79800950,
+      "content": "Something about this expense",
+      "comment_type": "User",
+      "relation_type": "ExpenseComment",
+      "relation_id": 855870953,
+      "created_at": "2020-05-14T04:12:25Z",
+      "deleted_at": null,
+      "user": {
+          "id": 1,
+          "first_name": "Ada",
+          "last_name": "Lovelace",
+          "picture": {
+              "small": "image_url",
+              "medium": "image_url",
+              "large": "image_url"
+          },
+          "email": "ada@example.com",
+          "registration_status": "confirmed"
+      }
+  },
+  "errors": {}
+}
