@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/oauth2"
 )
@@ -21,16 +22,18 @@ type SplitwiseTransactionProvider struct {
 }
 
 type SplitwiseOptions struct {
-	UserID       *int                    `json:"user_id"`
-	ClientKey    string                  `json:"client_key"`
-	ClientSecret string                  `json:"client_secret"`
-	TokenCache   string                  `json:"token_cache"`
-	Categories   map[string]CategorySpec `json:"categories"`
+	UserID       *int           `json:"user_id"`
+	ClientKey    string         `json:"client_key"`
+	ClientSecret string         `json:"client_secret"`
+	TokenCache   string         `json:"token_cache"`
+	Categories   []CategorySpec `json:"category_mapping"`
 }
 
 type CategorySpec struct {
 	Name string `json:"name"`
-	ID   string `json:"id"`
+
+	YnabID   string `json:"ynab_id"`
+	YnabName string `json:"ynab_name"`
 }
 
 func (options *SplitwiseOptions) newSplitwiseClient(ctx context.Context) *splitwise.Client {
@@ -62,9 +65,34 @@ func (options *SplitwiseOptions) NewProvider(ctx context.Context) (TransactionPr
 		userID = *options.UserID
 	}
 
+	if len(options.Categories) == 0 {
+		log.Debug().Msg("no category mapping specified")
+	}
+	categories := make(map[string]CategorySpec)
+	for _, spec := range options.Categories {
+		if _, ok := categories[spec.Name]; ok {
+			return nil, fmt.Errorf("duplicate splitwise name in category mapping: %s", spec.Name)
+		}
+		categories[spec.Name] = spec
+	}
+
+	mapping := zerolog.Dict()
+	for key, val := range categories {
+		mapping = mapping.Dict(key, zerolog.Dict().
+			Str("id", val.YnabID).
+			Str("name", val.YnabName),
+		)
+	}
+	log.Debug().
+		Dict("options", zerolog.Dict().
+			Int("user.id", userID).
+			Dict("categoryMapping", mapping),
+		).
+		Msg("Creating splitwise provider")
+
 	return &SplitwiseTransactionProvider{
 		userID:     userID,
-		categories: options.Categories,
+		categories: categories,
 		client:     client,
 	}, nil
 }
@@ -73,6 +101,9 @@ func (sts *SplitwiseTransactionProvider) Transactions(ctx context.Context, ynabI
 	// Get all splitwise transactions since this date
 
 	// Go up to one week before hint
+	log.Info().
+		Int("user", sts.userID).
+		Msg("Splitwise Transactions")
 	datedAfter := ynabInfo.LastUpdateHint.AddDate(0, 0, -7)
 	res, err := sts.client.GetExpenses(splitwise.GetExpensesRequest{
 		DatedAfter: &datedAfter,
@@ -89,6 +120,17 @@ func (sts *SplitwiseTransactionProvider) Transactions(ctx context.Context, ynabI
 		if len(rest) > 1 {
 			return nil, fmt.Errorf("not implemented: multi-user transactions")
 		}
+		log.Debug().
+			Str("expense", fmt.Sprintf("%+v", e)).
+			Dict("user", zerolog.Dict().
+				Str("NetBalance", user.NetBalance).
+				Str("OwedShare", user.OwedShare).
+				Str("PaidShare", user.PaidShare).
+				Int("UserId", user.UserId).
+				Str("FirstName", user.User.FirstName).
+				Str("LastName", user.User.LastName),
+			).
+			Msg("expense")
 
 		net, err := netBalanceToMilliUnits(user.NetBalance)
 		if err != nil {
@@ -97,7 +139,7 @@ func (sts *SplitwiseTransactionProvider) Transactions(ctx context.Context, ynabI
 
 		importId := strconv.Itoa(e.Id)
 		transaction := ynab.Transaction{
-			Amount:    -1 * net,
+			Amount:    net,
 			PayeeName: rest[0].User.FirstName,
 			Memo:      e.Description,
 			Approved:  false,
@@ -106,7 +148,17 @@ func (sts *SplitwiseTransactionProvider) Transactions(ctx context.Context, ynabI
 		}
 		categoryId, ok := sts.mapCategory(ynabInfo.Categories, e.Category)
 		if ok {
+			log.Debug().
+				Int("splitwise.category.id", e.Category.Id).
+				Str("splitwise.category.Name", e.Category.Name).
+				Str("ynab.category.id", categoryId).
+				Msg("mapping found")
 			transaction.CategoryId = &categoryId
+		} else {
+			log.Debug().
+				Int("splitwise.category.id", e.Category.Id).
+				Str("splitwise.category.Name", e.Category.Name).
+				Msg("no mapping found for splitwise category")
 		}
 
 		transactions = append(transactions, transaction)
@@ -129,17 +181,19 @@ func (sts *SplitwiseTransactionProvider) mapCategory(
 	if !ok {
 		return "", false
 	}
-	if m.ID != "" {
-		ynabCategory, ok := ynabCategoriesByID[m.ID]
+	if m.YnabID != "" {
+		log.Debug().Str("id", m.YnabID).Msg("mapping to ynab ID")
+		ynabCategory, ok := ynabCategoriesByID[m.YnabID]
 		if !ok {
 			log.Warn().
-				Str("categoryID", m.ID).
+				Str("categoryID", m.YnabID).
 				Msg("unknown YNAB category ID in splitwise mapping")
 			return "", false
 		}
 		return ynabCategory.Id, true
 	}
 	if m.Name != "" {
+		log.Debug().Str("name", m.Name).Msg("mapping to ynab Name")
 		ynabCategory, ok := ynabCategoriesByName[m.Name]
 		if !ok {
 			log.Warn().
@@ -174,12 +228,12 @@ func netBalanceToMilliUnits(owed string) (int, error) {
 	return (dollars*100 + cents) * 10, nil
 }
 
-func partionUsers(users []splitwise.ExpenseUser, userID int) (*splitwise.ExpenseUser, []splitwise.ExpenseUser) {
-	var user *splitwise.ExpenseUser
+func partionUsers(users []splitwise.ExpenseUser, userID int) (splitwise.ExpenseUser, []splitwise.ExpenseUser) {
+	var user splitwise.ExpenseUser
 	var other []splitwise.ExpenseUser
 	for _, u := range users {
 		if u.UserId == userID {
-			user = &u
+			user = u
 		} else {
 			other = append(other, u)
 		}

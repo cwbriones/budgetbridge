@@ -57,7 +57,11 @@ func newYNABClient(ctx context.Context, accessToken string) *ynab.Client {
 func initLogging() func() error {
 	w := bufio.NewWriter(os.Stderr)
 
-	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	level := zerolog.InfoLevel
+	if debug := os.Getenv("DEBUG"); debug != "" {
+		level = zerolog.DebugLevel
+	}
+	zerolog.SetGlobalLevel(level)
 	log.Logger = zerolog.
 		New(w).
 		With().
@@ -67,8 +71,35 @@ func initLogging() func() error {
 	return w.Flush
 }
 
+type dateFlag struct {
+	time   time.Time
+	layout string
+}
+
+func (f *dateFlag) Set(value string) error {
+	var t time.Time
+	var err error
+	if t, err = time.Parse(f.layout, value); err != nil {
+		return err
+	}
+	f.time = t
+	return nil
+}
+
+func (f *dateFlag) String() string {
+	return f.time.Format(f.layout)
+}
+
 func main() {
 	configPath := flag.String("config", "config.json", "the path of your config.json file")
+	dryRun := flag.Bool("dry", false, "emit the transactions but do not create them.")
+
+	lastUpdateHint := dateFlag{
+		layout: "2006-01-02",
+	}
+	flag.Var(&lastUpdateHint, "since", "how far to look back for transactions.")
+
+	flag.Parse()
 	flush := initLogging()
 	defer flush()
 
@@ -101,6 +132,11 @@ func main() {
 	categories, err := categoriesCache.Categories()
 	checkErr(err)
 
+	categoriesById := make(map[string]ynab.Category)
+	for _, c := range categories {
+		categoriesById[c.Id] = c
+	}
+
 	var transactions []ynab.Transaction
 	for _, providerConfig := range config.Providers.Map {
 		provider, err := providerConfig.Options.NewProvider(ctx)
@@ -114,11 +150,13 @@ func main() {
 		})
 		checkErr(err)
 
-		mostRecentDate := time.Time(res.Transactions[len(res.Transactions)-1].Date)
-		log.Info().Time("upToDate", mostRecentDate).Msg("fetching transactions")
+		if lastUpdateHint.time.IsZero() {
+			lastUpdateHint.time = time.Time(res.Transactions[len(res.Transactions)-1].Date)
+		}
+		log.Info().Time("since", lastUpdateHint.time).Msg("fetching transactions")
 
 		fetched, err := provider.Transactions(ctx, YnabInfo{
-			LastUpdateHint: mostRecentDate,
+			LastUpdateHint: lastUpdateHint.time,
 			Categories:     categories,
 		})
 		checkErr(err)
@@ -126,6 +164,36 @@ func main() {
 			fetched[i].AccountId = providerConfig.AccountID
 		}
 		transactions = append(transactions, fetched...)
+	}
+
+	if *dryRun {
+		log.Info().Msg("DRY RUN: No transactions will be created.")
+		for _, t := range transactions {
+			var importID string
+			var categoryID string
+			var categoryName string
+			if t.ImportId != nil {
+				importID = *t.ImportId
+			}
+			if t.CategoryId != nil {
+				categoryID = *t.CategoryId
+				if c, ok := categoriesById[categoryID]; ok {
+					categoryName = c.Name
+				}
+			}
+			log.Info().
+				Dict("transaction", zerolog.Dict().
+					Time("date", t.Date.Time()).
+					Str("memo", t.Memo).
+					Int("amount", t.Amount).
+					Str("payeeName", t.PayeeName).
+					Str("importID", importID).
+					Str("category.id", categoryID).
+					Str("category.name", categoryName),
+				).
+				Msg("DRY RUN: would create")
+		}
+		return
 	}
 
 	if len(transactions) > 0 {

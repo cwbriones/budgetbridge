@@ -51,7 +51,7 @@ func (pm *Providers) Register(name string, v NewProvider) error {
 	}
 	_, ok := pm.registry[name]
 	if ok {
-		return fmt.Errorf("The name '%s' is already registered", name)
+		return fmt.Errorf("the name '%s' is already registered", name)
 	}
 	pm.registry[name] = reflect.TypeOf(v)
 	return nil
@@ -68,7 +68,7 @@ func (pm *Providers) UnmarshalJSON(bytes []byte) error {
 
 		rt, ok := pm.registry[k]
 		if !ok {
-			return fmt.Errorf("Unknown provider '%s'", k)
+			return fmt.Errorf("unknown provider '%s'", k)
 		}
 
 		p := reflect.New(rt).Elem()
