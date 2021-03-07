@@ -1,6 +1,7 @@
 package splitwise
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -114,23 +115,23 @@ func NewUser(req CreateFriendRequest) UserOption {
 	})
 }
 
-func (c *Client) GetGroups() ([]Group, error) {
+func (c *Client) GetGroups(ctx context.Context) ([]Group, error) {
 	var res struct {
 		Groups []Group
 	}
-	err := c.get("get_groups", &res)
+	err := c.get(ctx, "get_groups", &res)
 	return res.Groups, err
 }
 
-func (c *Client) GetGroup(id int) (*Group, error) {
+func (c *Client) GetGroup(ctx context.Context, id int) (*Group, error) {
 	var res struct {
 		Group Group
 	}
-	err := c.get(fmt.Sprintf("get_group/%d", id), &res)
+	err := c.get(ctx, fmt.Sprintf("get_group/%d", id), &res)
 	return &res.Group, err
 }
 
-func (c *Client) CreateGroup(req CreateGroupRequest, user UserOption, users ...UserOption) (*Group, error) {
+func (c *Client) CreateGroup(ctx context.Context, req CreateGroupRequest, user UserOption, users ...UserOption) (*Group, error) {
 	rw := newRequest()
 
 	rw.Str("name", req.Name)
@@ -150,6 +151,7 @@ func (c *Client) CreateGroup(req CreateGroupRequest, user UserOption, users ...U
 		Errors APIError `json:"errors"`
 	}
 	err := c.do(
+		ctx,
 		http.MethodPost,
 		&url.URL{Path: "create_group"},
 		rw.Values,
@@ -161,12 +163,13 @@ func (c *Client) CreateGroup(req CreateGroupRequest, user UserOption, users ...U
 	return &res.Group, err
 }
 
-func (c *Client) DeleteGroup(id int) error {
+func (c *Client) DeleteGroup(ctx context.Context, id int) error {
 	var res struct {
 		Success bool     `json:"success"`
 		Errors  APIError `json:"errors"`
 	}
 	err := c.do(
+		ctx,
 		http.MethodPost,
 		&url.URL{Path: fmt.Sprintf("delete_group/%d", id)},
 		nil,
@@ -181,12 +184,13 @@ func (c *Client) DeleteGroup(id int) error {
 	return &res.Errors
 }
 
-func (c *Client) UndeleteGroup(id int) error {
+func (c *Client) UndeleteGroup(ctx context.Context, id int) error {
 	var res struct {
 		Success bool     `json:"success"`
 		Errors  APIError `json:"errors"`
 	}
 	err := c.do(
+		ctx,
 		http.MethodPost,
 		&url.URL{Path: fmt.Sprintf("undelete_group/%d", id)},
 		nil,
@@ -201,7 +205,7 @@ func (c *Client) UndeleteGroup(id int) error {
 	return &res.Errors
 }
 
-func (c *Client) AddUserToGroup(id int, user UserOption) error {
+func (c *Client) AddUserToGroup(ctx context.Context, id int, user UserOption) error {
 	rw := newRequest()
 	rw.Int("group_id", id)
 	user.prepareRequest(rw)
@@ -210,6 +214,7 @@ func (c *Client) AddUserToGroup(id int, user UserOption) error {
 		Errors  APIError `json:"errors"`
 	}
 	err := c.do(
+		ctx,
 		http.MethodPost,
 		&url.URL{Path: "add_user_to_group"},
 		rw.Values,
@@ -224,7 +229,7 @@ func (c *Client) AddUserToGroup(id int, user UserOption) error {
 	return &res.Errors
 }
 
-func (c *Client) RemoveUserFromGroup(id int, userID int) error {
+func (c *Client) RemoveUserFromGroup(ctx context.Context, id int, userID int) error {
 	req := url.Values{
 		"group_id": []string{strconv.Itoa(id)},
 		"user_id":  []string{strconv.Itoa(userID)},
@@ -234,6 +239,7 @@ func (c *Client) RemoveUserFromGroup(id int, userID int) error {
 		Errors  APIError `json:"errors"`
 	}
 	err := c.do(
+		ctx,
 		http.MethodPost,
 		&url.URL{Path: "remove_user_from_group"},
 		req,

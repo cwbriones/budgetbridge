@@ -2,6 +2,7 @@ package ynab
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -170,8 +171,8 @@ type Account struct {
 	Type string `json:"type"`
 }
 
-func (c *Client) Budgets() (response BudgetsResponse, err error) {
-	req, err := c.newRequest("GET", "budgets", nil)
+func (c *Client) Budgets(ctx context.Context) (response BudgetsResponse, err error) {
+	req, err := c.newRequest(ctx, "GET", "budgets", nil)
 	if err != nil {
 		return
 	}
@@ -179,9 +180,9 @@ func (c *Client) Budgets() (response BudgetsResponse, err error) {
 	return
 }
 
-func (c *Client) Accounts(budgetID string) (response AccountsResponse, err error) {
+func (c *Client) Accounts(ctx context.Context, budgetID string) (response AccountsResponse, err error) {
 	u := fmt.Sprintf("budgets/%s/accounts", budgetID)
-	req, err := c.newRequest("GET", u, nil)
+	req, err := c.newRequest(ctx, "GET", u, nil)
 	if err != nil {
 		return
 	}
@@ -189,9 +190,9 @@ func (c *Client) Accounts(budgetID string) (response AccountsResponse, err error
 	return
 }
 
-func (c *Client) Account(budgetID, accountID string) (response AccountResponse, err error) {
+func (c *Client) Account(ctx context.Context, budgetID, accountID string) (response AccountResponse, err error) {
 	u := fmt.Sprintf("budgets/%s/accounts/%s", budgetID, accountID)
-	req, err := c.newRequest("GET", u, nil)
+	req, err := c.newRequest(ctx, "GET", u, nil)
 	if err != nil {
 		return
 	}
@@ -205,7 +206,7 @@ type TransactionsRequest struct {
 	SinceDate time.Time
 }
 
-func (c *Client) Transactions(request TransactionsRequest) (response TransactionsResponse, err error) {
+func (c *Client) Transactions(ctx context.Context, request TransactionsRequest) (response TransactionsResponse, err error) {
 	var u string
 	if request.BudgetID == "" {
 		return TransactionsResponse{}, fmt.Errorf("Missing BudgetID")
@@ -214,7 +215,7 @@ func (c *Client) Transactions(request TransactionsRequest) (response Transaction
 	} else {
 		u = fmt.Sprintf("budgets/%s/transactions", request.BudgetID)
 	}
-	req, err := c.newRequest("GET", u, &request)
+	req, err := c.newRequest(ctx, "GET", u, &request)
 	if request.SinceDate.Unix() > 0 {
 		qs := make(url.Values)
 		qs.Add("since_date", request.SinceDate.Format("2006-01-02"))
@@ -227,9 +228,9 @@ func (c *Client) Transactions(request TransactionsRequest) (response Transaction
 	return
 }
 
-func (c *Client) CreateTransactions(budgetID string, request CreateTransactionsRequest) (response TransactionsResponse, err error) {
+func (c *Client) CreateTransactions(ctx context.Context, budgetID string, request CreateTransactionsRequest) (response TransactionsResponse, err error) {
 	u := fmt.Sprintf("budgets/%s/transactions", budgetID)
-	req, err := c.newRequest("POST", u, &request)
+	req, err := c.newRequest(ctx, "POST", u, &request)
 	if err != nil {
 		return
 	}
@@ -237,9 +238,9 @@ func (c *Client) CreateTransactions(budgetID string, request CreateTransactionsR
 	return
 }
 
-func (c *Client) Categories(request CategoriesRequest) (response CategoriesResponse, err error) {
+func (c *Client) Categories(ctx context.Context, request CategoriesRequest) (response CategoriesResponse, err error) {
 	u := fmt.Sprintf("budgets/%s/categories", request.BudgetID)
-	req, err := c.newRequest("GET", u, &request)
+	req, err := c.newRequest(ctx, "GET", u, &request)
 	if err != nil {
 		return
 	}
@@ -247,7 +248,7 @@ func (c *Client) Categories(request CategoriesRequest) (response CategoriesRespo
 	return
 }
 
-func (c *Client) newRequest(method, path string, body interface{}) (*http.Request, error) {
+func (c *Client) newRequest(ctx context.Context, method, path string, body interface{}) (*http.Request, error) {
 	var buf io.ReadWriter
 	if body != nil {
 		buf = &bytes.Buffer{}
@@ -265,6 +266,7 @@ func (c *Client) newRequest(method, path string, body interface{}) (*http.Reques
 	if err != nil {
 		return nil, err
 	}
+	req = req.WithContext(ctx)
 	if body != nil {
 		req.Header.Add("Content-Type", "application/json")
 	}

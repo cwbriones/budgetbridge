@@ -1,6 +1,7 @@
 package splitwise
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -98,7 +99,7 @@ type Comment struct {
 	User         User       `json:"user"`
 }
 
-func (c *Client) CreateExpense(req CreateExpenseRequest) (*Expense, error) {
+func (c *Client) CreateExpense(ctx context.Context, req CreateExpenseRequest) (*Expense, error) {
 	var res struct {
 		Expense Expense  `json:"expense"`
 		Errors  APIError `json:"errors"`
@@ -121,6 +122,7 @@ func (c *Client) CreateExpense(req CreateExpenseRequest) (*Expense, error) {
 	}
 	req.SplitStrategy.prepareRequest(rw)
 	err := c.do(
+		ctx,
 		http.MethodPost,
 		&url.URL{Path: "create_expense"},
 		rw.Values,
@@ -135,15 +137,15 @@ func (c *Client) CreateExpense(req CreateExpenseRequest) (*Expense, error) {
 	return &res.Expense, nil
 }
 
-func (c *Client) GetExpense(id int) (*Expense, error) {
+func (c *Client) GetExpense(ctx context.Context, id int) (*Expense, error) {
 	var res struct {
 		Expense Expense `json:"expense"`
 	}
-	err := c.get(fmt.Sprintf("get_expense/%d", id), &res)
+	err := c.get(ctx, fmt.Sprintf("get_expense/%d", id), &res)
 	return &res.Expense, err
 }
 
-func (c *Client) GetExpenses(req *GetExpensesRequest) ([]Expense, error) {
+func (c *Client) GetExpenses(ctx context.Context, req *GetExpensesRequest) ([]Expense, error) {
 	values := make(url.Values)
 	if req.DatedAfter != nil {
 		values.Add("dated_after", req.DatedAfter.Format("2006-01-02"))
@@ -170,18 +172,18 @@ func (c *Client) GetExpenses(req *GetExpensesRequest) ([]Expense, error) {
 		Path:     "get_expenses",
 		RawQuery: values.Encode(),
 	}
-	if err := c.do(http.MethodGet, u, nil, &res); err != nil {
+	if err := c.do(ctx, http.MethodGet, u, nil, &res); err != nil {
 		return nil, err
 	}
 	req.Offset = len(res.Expenses)
 	return res.Expenses, nil
 }
 
-func (c *Client) DeleteExpense(id int) error {
+func (c *Client) DeleteExpense(ctx context.Context, id int) error {
 	var res struct {
 		Success *bool `json:"success"`
 	}
-	if err := c.do(http.MethodPost, &url.URL{Path: fmt.Sprintf("delete_expense/%d", id)}, nil, &res); err != nil {
+	if err := c.do(ctx, http.MethodPost, &url.URL{Path: fmt.Sprintf("delete_expense/%d", id)}, nil, &res); err != nil {
 		return err
 	}
 	if res.Success != nil && *res.Success {
@@ -190,11 +192,11 @@ func (c *Client) DeleteExpense(id int) error {
 	return errors.New("unsuccessful")
 }
 
-func (c *Client) UndeleteExpense(id int) error {
+func (c *Client) UndeleteExpense(ctx context.Context, id int) error {
 	var res struct {
 		Success *bool `json:"success"`
 	}
-	if err := c.do(http.MethodPost, &url.URL{Path: fmt.Sprintf("undelete_expense/%d", id)}, nil, &res); err != nil {
+	if err := c.do(ctx, http.MethodPost, &url.URL{Path: fmt.Sprintf("undelete_expense/%d", id)}, nil, &res); err != nil {
 		return err
 	}
 	if res.Success != nil && *res.Success {
@@ -203,15 +205,15 @@ func (c *Client) UndeleteExpense(id int) error {
 	return errors.New("unsuccessful")
 }
 
-func (c *Client) GetComments(expenseID int) ([]Comment, error) {
+func (c *Client) GetComments(ctx context.Context, expenseID int) ([]Comment, error) {
 	var res struct {
 		Comments []Comment `json:"comments"`
 	}
-	err := c.get("get_comments", &res)
+	err := c.get(ctx, "get_comments", &res)
 	return res.Comments, err
 }
 
-func (c *Client) CreateComment(expenseID int, content string) (*Comment, error) {
+func (c *Client) CreateComment(ctx context.Context, expenseID int, content string) (*Comment, error) {
 	values := url.Values{
 		"expense_id": []string{strconv.Itoa(expenseID)},
 		"content":    []string{content},
@@ -220,7 +222,7 @@ func (c *Client) CreateComment(expenseID int, content string) (*Comment, error) 
 		Comment Comment  `json:"comment"`
 		Errors  APIError `json:"errors"`
 	}
-	err := c.do(http.MethodPost, &url.URL{Path: "create_comment"}, values, &res)
+	err := c.do(ctx, http.MethodPost, &url.URL{Path: "create_comment"}, values, &res)
 	if err != nil {
 		return nil, err
 	}
@@ -230,12 +232,12 @@ func (c *Client) CreateComment(expenseID int, content string) (*Comment, error) 
 	return &res.Comment, nil
 }
 
-func (c *Client) GetComment(id int) (*Comment, error) {
+func (c *Client) GetComment(ctx context.Context, id int) (*Comment, error) {
 	var res struct {
 		Comment Comment  `json:"comment"`
 		Errors  APIError `json:"errors"`
 	}
-	err := c.get(fmt.Sprintf("get_comment/%d", id), &res)
+	err := c.get(ctx, fmt.Sprintf("get_comment/%d", id), &res)
 	if err != nil {
 		return nil, err
 	}
@@ -245,12 +247,12 @@ func (c *Client) GetComment(id int) (*Comment, error) {
 	return &res.Comment, nil
 }
 
-func (c *Client) DeleteComment(id int) (*Comment, error) {
+func (c *Client) DeleteComment(ctx context.Context, id int) (*Comment, error) {
 	var res struct {
 		Comment Comment  `json:"comment"`
 		Errors  APIError `json:"errors"`
 	}
-	err := c.get(fmt.Sprintf("delete_comment/%d", id), &res)
+	err := c.get(ctx, fmt.Sprintf("delete_comment/%d", id), &res)
 	if err != nil {
 		return nil, err
 	}

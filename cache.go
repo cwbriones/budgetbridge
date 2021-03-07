@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -16,14 +17,14 @@ type CategoriesCache struct {
 	enabled  bool
 }
 
-func (c *CategoriesCache) Categories() ([]ynab.Category, error) {
+func (c *CategoriesCache) Categories(ctx context.Context) ([]ynab.Category, error) {
 	var categories []ynab.Category
 	if err := c.get(&categories); err == nil {
 		return categories, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	categories, err := c.fetch()
+	categories, err := c.fetch(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -53,8 +54,8 @@ func (c *CategoriesCache) get(v interface{}) error {
 	return json.NewDecoder(bufio.NewReader(f)).Decode(v)
 }
 
-func (c *CategoriesCache) fetch() ([]ynab.Category, error) {
-	categoriesResponse, err := c.client.Categories(ynab.CategoriesRequest{
+func (c *CategoriesCache) fetch(ctx context.Context) ([]ynab.Category, error) {
+	categoriesResponse, err := c.client.Categories(ctx, ynab.CategoriesRequest{
 		BudgetID: c.budgetID,
 	})
 	if err != nil {

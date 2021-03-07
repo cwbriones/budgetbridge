@@ -2,6 +2,7 @@ package splitwise
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -196,39 +197,40 @@ type ParseSentenceResponse struct {
 	Error   string  `json:"error"`
 }
 
-func (c *Client) GetCategories() (*GetCategoriesResponse, error) {
+func (c *Client) GetCategories(ctx context.Context) (*GetCategoriesResponse, error) {
 	var res GetCategoriesResponse
-	err := c.get("get_categories", &res)
+	err := c.get(ctx, "get_categories", &res)
 	return &res, err
 }
 
-func (c *Client) GetCurrentUser() (*User, error) {
+func (c *Client) GetCurrentUser(ctx context.Context) (*User, error) {
 	var res struct {
 		User User `json:"user"`
 	}
-	err := c.get("get_current_user", &res)
+	err := c.get(ctx, "get_current_user", &res)
 	return &res.User, err
 }
 
-func (c *Client) GetUser(id int) (*User, error) {
+func (c *Client) GetUser(ctx context.Context, id int) (*User, error) {
 	var res struct {
 		User User `json:"user"`
 	}
-	err := c.get(fmt.Sprintf("get_user/%d", id), &res)
+	err := c.get(ctx, fmt.Sprintf("get_user/%d", id), &res)
 	return &res.User, err
 }
 
-func (c *Client) ParseSentence(req ParseSentenceRequest) (*ParseSentenceResponse, error) {
+func (c *Client) ParseSentence(ctx context.Context, req ParseSentenceRequest) (*ParseSentenceResponse, error) {
 	var res ParseSentenceResponse
-	err := c.do(http.MethodPost, &url.URL{Path: "parse_sentence"}, nil, &res)
+	err := c.do(ctx, http.MethodPost, &url.URL{Path: "parse_sentence"}, nil, &res)
 	return &res, err
 }
 
-func (c *Client) get(endpoint string, apiResponse interface{}) error {
-	return c.do(http.MethodGet, &url.URL{Path: endpoint}, nil, apiResponse)
+func (c *Client) get(ctx context.Context, endpoint string, apiResponse interface{}) error {
+	return c.do(ctx, http.MethodGet, &url.URL{Path: endpoint}, nil, apiResponse)
 }
 
 func (c *Client) do(
+	ctx context.Context,
 	method string,
 	u *url.URL,
 	apiRequest url.Values,
@@ -249,6 +251,7 @@ func (c *Client) do(
 	if err != nil {
 		return fmt.Errorf("could not construct request: %s", err)
 	}
+	req = req.WithContext(ctx)
 	if body != nil {
 		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 		req.Header.Add("Content-Length", strconv.Itoa(contentLength))

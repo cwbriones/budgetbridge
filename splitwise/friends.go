@@ -1,6 +1,7 @@
 package splitwise
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -33,28 +34,29 @@ type CreateFriendRequest struct {
 	Email     string
 }
 
-func (c *Client) GetFriends() ([]Friend, error) {
+func (c *Client) GetFriends(ctx context.Context) ([]Friend, error) {
 	var res struct {
 		Friends []Friend `json:"friends"`
 	}
-	err := c.get("get_friends", &res)
+	err := c.get(ctx, "get_friends", &res)
 	return res.Friends, err
 }
 
-func (c *Client) GetFriend(id int) (*Friend, error) {
+func (c *Client) GetFriend(ctx context.Context, id int) (*Friend, error) {
 	var res struct {
 		Friend Friend `json:"friend"`
 	}
-	err := c.get(fmt.Sprintf("get_friend/%d", id), &res)
+	err := c.get(ctx, fmt.Sprintf("get_friend/%d", id), &res)
 	return &res.Friend, err
 }
 
-func (c *Client) DeleteFriend(id int) error {
+func (c *Client) DeleteFriend(ctx context.Context, id int) error {
 	var res struct {
 		Success bool     `json:"success"`
 		Errors  APIError `json:"errors"`
 	}
 	if err := c.do(
+		ctx,
 		http.MethodPost,
 		&url.URL{
 			Path: fmt.Sprintf("delete_friend/%d", id),
@@ -70,7 +72,7 @@ func (c *Client) DeleteFriend(id int) error {
 	return &res.Errors
 }
 
-func (c *Client) CreateFriend(req *CreateFriendRequest) (*Friend, error) {
+func (c *Client) CreateFriend(ctx context.Context, req *CreateFriendRequest) (*Friend, error) {
 	values := map[string][]string{
 		"user_email":      {req.Email},
 		"user_first_name": {req.FirstName},
@@ -80,6 +82,7 @@ func (c *Client) CreateFriend(req *CreateFriendRequest) (*Friend, error) {
 		Friend Friend `json:"friend"`
 	}
 	err := c.do(
+		ctx,
 		http.MethodPost,
 		&url.URL{Path: "create_friend"},
 		values,
@@ -88,7 +91,7 @@ func (c *Client) CreateFriend(req *CreateFriendRequest) (*Friend, error) {
 	return &res.Friend, err
 }
 
-func (c *Client) CreateFriends(req ...*CreateFriendRequest) ([]Friend, error) {
+func (c *Client) CreateFriends(ctx context.Context, req ...*CreateFriendRequest) ([]Friend, error) {
 	rw := newRequest()
 	arr := rw.Array("friends")
 	for _, user := range req {
@@ -101,6 +104,7 @@ func (c *Client) CreateFriends(req ...*CreateFriendRequest) ([]Friend, error) {
 		Friends []Friend `json:"friends"`
 	}
 	err := c.do(
+		ctx,
 		http.MethodPost,
 		&url.URL{Path: "create_friend"},
 		rw.Values,

@@ -30,11 +30,11 @@ type TransactionProvider interface {
 	Transactions(context.Context, YnabInfo) ([]ynab.Transaction, error)
 }
 
-func getBudgetID(ynabClient *ynab.Client, config Config) (string, error) {
+func getBudgetID(ctx context.Context, ynabClient *ynab.Client, config Config) (string, error) {
 	if config.BudgetID != nil {
 		return *config.BudgetID, nil
 	}
-	res, err := ynabClient.Budgets()
+	res, err := ynabClient.Budgets(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -120,7 +120,7 @@ func main() {
 		err = os.MkdirAll(config.Cache.Dir, os.ModePerm)
 		checkErr(err)
 	}
-	budgetID, err := getBudgetID(ynabClient, config)
+	budgetID, err := getBudgetID(ctx, ynabClient, config)
 	checkErr(err)
 	categoriesCache := CategoriesCache{
 		client:   ynabClient,
@@ -129,7 +129,7 @@ func main() {
 		path:     filepath.Join(config.Cache.Dir, "categories"),
 	}
 
-	categories, err := categoriesCache.Categories()
+	categories, err := categoriesCache.Categories(ctx)
 	checkErr(err)
 
 	categoriesById := make(map[string]ynab.Category)
@@ -143,7 +143,7 @@ func main() {
 		checkErr(err)
 
 		// Get the most recent YNAB transactions from this account
-		res, err := ynabClient.Transactions(ynab.TransactionsRequest{
+		res, err := ynabClient.Transactions(ctx, ynab.TransactionsRequest{
 			BudgetID:  budgetID,
 			AccountID: providerConfig.AccountID,
 			SinceDate: time.Now().AddDate(0, 0, -int(config.LookBackDays)),
@@ -200,7 +200,7 @@ func main() {
 		request := ynab.CreateTransactionsRequest{
 			Transactions: transactions,
 		}
-		res, err := ynabClient.CreateTransactions(budgetID, request)
+		res, err := ynabClient.CreateTransactions(ctx, budgetID, request)
 		checkErr(err)
 		if len(res.Transactions) > 0 {
 			for _, t := range res.Transactions {

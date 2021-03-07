@@ -56,7 +56,7 @@ func (options *SplitwiseOptions) NewProvider(ctx context.Context) (TransactionPr
 
 	var userID int
 	if options.UserID == nil {
-		if res, err := client.GetCurrentUser(); err != nil {
+		if res, err := client.GetCurrentUser(ctx); err != nil {
 			return nil, err
 		} else {
 			userID = res.ID
@@ -109,7 +109,7 @@ func (sts *SplitwiseTransactionProvider) Transactions(ctx context.Context, ynabI
 	}
 	var transactions []ynab.Transaction
 	for {
-		expenses, err := sts.client.GetExpenses(&req)
+		expenses, err := sts.client.GetExpenses(ctx, &req)
 		if err != nil {
 			return nil, fmt.Errorf("get expenses: %s", err)
 		}
