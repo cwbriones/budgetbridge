@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -19,7 +18,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-func getBudgetID(ctx context.Context, ynabClient *ynab.Client, config Config) (string, error) {
+func getBudgetID(ctx context.Context, ynabClient ynabClient, config Config) (string, error) {
 	if config.BudgetID != nil {
 		log.Debug().Msg("using pre-configured budget_id")
 		return *config.BudgetID, nil
@@ -133,7 +132,16 @@ func main() {
 
 	ctx := context.Background()
 
-	ynabClient := newYNABClient(ctx, config.AccessToken)
+	ynabCache := &FileCache{
+		path:          config.Cache.Dir,
+		createMissing: config.Cache.CreateMissingDir,
+	}
+	check(ynabCache.Open())
+
+	ynabClient := &CachingClient{
+		client: newYNABClient(ctx, config.AccessToken),
+		cache:  ynabCache,
+	}
 
 	if config.Cache.CreateMissingDir {
 		err = os.MkdirAll(config.Cache.Dir, os.ModePerm)
@@ -141,15 +149,13 @@ func main() {
 	}
 	budgetID, err := getBudgetID(ctx, ynabClient, config)
 	check(err)
-	categoriesCache := CategoriesCache{
-		client:   ynabClient,
-		budgetID: budgetID,
-		enabled:  true,
-		path:     filepath.Join(config.Cache.Dir, "categories"),
-	}
 
-	categories, err := categoriesCache.Categories(ctx)
+	res, err := ynabClient.Categories(ctx, ynab.CategoriesRequest{BudgetID: budgetID})
 	check(err)
+	var categories []ynab.Category
+	for _, group := range res.CategoryGroups {
+		categories = append(categories, group.Categories...)
+	}
 
 	providers := config.Providers.initAll(ctx)
 	if len(providers) == 0 {
