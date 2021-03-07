@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
+	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -19,11 +21,13 @@ import (
 
 func getBudgetID(ctx context.Context, ynabClient *ynab.Client, config Config) (string, error) {
 	if config.BudgetID != nil {
+		log.Debug().Msg("using pre-configured budget_id")
 		return *config.BudgetID, nil
 	}
+	log.Debug().Msg("no budget_id configured, fetching")
 	res, err := ynabClient.Budgets(ctx)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("fetch budget_id: %s", err)
 	}
 	if len(res.Budgets) == 1 {
 		return res.Budgets[0].Id, nil
@@ -42,13 +46,12 @@ func newYNABClient(ctx context.Context, accessToken string) *ynab.Client {
 }
 
 func initLogging() func() error {
-	w := bufio.NewWriter(os.Stderr)
-
 	level := zerolog.InfoLevel
-	if debug := os.Getenv("DEBUG"); debug != "" {
-		level = zerolog.DebugLevel
+	if envlevel, ok := getLogLevelEnv(); ok {
+		level = envlevel
 	}
 	zerolog.SetGlobalLevel(level)
+	w := bufio.NewWriter(os.Stderr)
 	log.Logger = zerolog.
 		New(w).
 		With().
@@ -56,6 +59,19 @@ func initLogging() func() error {
 		Logger()
 
 	return w.Flush
+}
+
+func getLogLevelEnv() (zerolog.Level, bool) {
+	var level zerolog.Level
+
+	lvlstr := os.Getenv("LOG")
+	if lvlstr == "" {
+		return level, false
+	}
+	if level, err := zerolog.ParseLevel(lvlstr); err == nil {
+		return level, true
+	}
+	return level, false
 }
 
 type dateFlag struct {
@@ -89,15 +105,31 @@ func main() {
 	flag.Parse()
 	flush := initLogging()
 	defer flush()
+	defer func() {
+		if v := recover(); v != nil {
+			var event *zerolog.Event
+			if e, ok := v.(error); ok {
+				event = log.Err(e)
+			} else if e, ok := v.(string); ok {
+				event = log.Error().Str("error", e)
+			}
+			stack := strings.Split(string(debug.Stack()), "\n")
+			event.
+				Str("type", fmt.Sprintf("%T\n", v)).
+				Strs("stack", stack).
+				Msg("exiting due to panic")
+			os.Exit(1)
+		}
+	}()
 
 	var config Config
 	err := config.Providers.SetRegistry(map[string]NewProvider{
 		"splitwise": &SplitwiseOptions{},
 	})
-	checkErr(err)
+	check(err)
 
 	err = config.load(*configPath)
-	checkErr(err)
+	check(err)
 
 	ctx := context.Background()
 
@@ -105,10 +137,10 @@ func main() {
 
 	if config.Cache.CreateMissingDir {
 		err = os.MkdirAll(config.Cache.Dir, os.ModePerm)
-		checkErr(err)
+		check(err)
 	}
 	budgetID, err := getBudgetID(ctx, ynabClient, config)
-	checkErr(err)
+	check(err)
 	categoriesCache := CategoriesCache{
 		client:   ynabClient,
 		budgetID: budgetID,
@@ -117,106 +149,28 @@ func main() {
 	}
 
 	categories, err := categoriesCache.Categories(ctx)
-	checkErr(err)
+	check(err)
 
-	categoriesById := make(map[string]ynab.Category)
-	for _, c := range categories {
-		categoriesById[c.Id] = c
-	}
-
-	var transactions []ynab.Transaction
-	for _, providerConfig := range config.Providers.Map {
-		provider, err := providerConfig.Options.NewProvider(ctx)
-		checkErr(err)
-
-		// Get the most recent YNAB transactions from this account
-		res, err := ynabClient.Transactions(ctx, ynab.TransactionsRequest{
-			BudgetID:  budgetID,
-			AccountID: providerConfig.AccountID,
-			SinceDate: time.Now().AddDate(0, 0, -int(config.LookBackDays)),
-		})
-		checkErr(err)
-
-		if lastUpdateHint.time.IsZero() {
-			lastUpdateHint.time = time.Time(res.Transactions[len(res.Transactions)-1].Date)
-		}
-		log.Info().Time("since", lastUpdateHint.time).Msg("fetching transactions")
-
-		fetched, err := provider.Transactions(ctx, YnabInfo{
-			LastUpdateHint: lastUpdateHint.time,
-			Categories:     categories,
-		})
-		checkErr(err)
-		for i := 0; i < len(fetched); i++ {
-			fetched[i].AccountId = providerConfig.AccountID
-		}
-		transactions = append(transactions, fetched...)
-	}
-
-	if *dryRun {
-		log.Info().Msg("DRY RUN: No transactions will be created.")
-		for _, t := range transactions {
-			var importID string
-			var categoryID string
-			var categoryName string
-			if t.ImportId != nil {
-				importID = *t.ImportId
-			}
-			if t.CategoryId != nil {
-				categoryID = *t.CategoryId
-				if c, ok := categoriesById[categoryID]; ok {
-					categoryName = c.Name
-				}
-			}
-			log.Info().
-				Dict("transaction", zerolog.Dict().
-					Time("date", t.Date.Time()).
-					Str("memo", t.Memo).
-					Int("amount", t.Amount).
-					Str("payeeName", t.PayeeName).
-					Str("importID", importID).
-					Str("category.id", categoryID).
-					Str("category.name", categoryName),
-				).
-				Msg("DRY RUN: would create")
-		}
+	providers := config.Providers.initAll(ctx)
+	if len(providers) == 0 {
+		log.Warn().Msg("no providers are configured")
 		return
 	}
 
-	if len(transactions) > 0 {
-		request := ynab.CreateTransactionsRequest{
-			Transactions: transactions,
-		}
-		res, err := ynabClient.CreateTransactions(ctx, budgetID, request)
-		checkErr(err)
-		if len(res.Transactions) > 0 {
-			for _, t := range res.Transactions {
-				importID := "<unset>"
-				if t.ImportId != nil {
-					importID = *t.ImportId
-				}
-				log.Info().
-					Dict("transaction", zerolog.Dict().
-						Time("date", t.Date.Time()).
-						Str("memo", t.Memo).
-						Int("amount", t.Amount).
-						Str("payeeName", t.PayeeName).
-						Str("importID", importID),
-					).
-					Msg("created transaction")
-			}
-			log.Info().Int("count", len(res.Transactions)).Msg("transactions successfully created")
-		} else {
-			log.Info().Msg("no new transactions were created")
-		}
-		if len(res.DuplicateImportIDs) > 0 {
-			log.Info().Int("count", len(res.DuplicateImportIDs)).Msg("duplicate transaction IDs were ignored.")
-		}
+	bridge := BudgetBridge{
+		budgetID,
+		config.LookBackDays,
+		ynabClient,
+		providers,
+		categories,
+		*dryRun,
 	}
+	err = bridge.ImportAll(ctx, config)
+	check(err)
 }
 
-func checkErr(err error) {
+func check(err error) {
 	if err != nil {
-		log.Fatal().Err(err)
+		panic(err)
 	}
 }
