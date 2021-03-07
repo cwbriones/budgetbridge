@@ -71,17 +71,17 @@ func (p *LocalServerTokenSource) Token() (*oauth2.Token, error) {
 	ctx := context.Background()
 	state, err := newState()
 	if err != nil {
-		return nil, fmt.Errorf("Could not generate CSRF token: %w", err)
+		return nil, fmt.Errorf("generate csrf token: %s", err)
 	}
 	url := p.Config.AuthCodeURL(state, oauth2.AccessTypeOffline)
-	fmt.Printf("Open this URL in the browser to authenticate.\n\n%s\n", url)
+	fmt.Printf("open this URL in the browser to authenticate.\n\n%s\n", url)
 
 	resp, err := waitForCallback(":4000", state)
 	if err != nil {
-		return nil, fmt.Errorf("Callback failed: %w", err)
+		return nil, fmt.Errorf("wait for callback: %s", err)
 	}
 	if resp.State != state {
-		return nil, fmt.Errorf("Callback state mismatch")
+		return nil, fmt.Errorf("callback state mismatch")
 	}
 	return p.Config.Exchange(ctx, resp.Code, oauth2.AccessTypeOffline)
 }
@@ -104,7 +104,7 @@ type callbackResponse struct {
 func waitForCallback(addr, csrfToken string) (resp callbackResponse, err error) {
 	defer func() {
 		if v := recover(); v != nil {
-			err = fmt.Errorf("Server panicked")
+			err = fmt.Errorf("server panicked")
 		}
 	}()
 	c := make(chan callbackResponse)

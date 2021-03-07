@@ -5,6 +5,7 @@ import (
 	swEndpoint "budgetbridge/splitwise/endpoint"
 	"budgetbridge/ynab"
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -16,24 +17,85 @@ import (
 )
 
 type SplitwiseTransactionProvider struct {
-	userID     int
-	client     *splitwise.Client
-	categories map[string]CategorySpec
+	userID          int
+	client          *splitwise.Client
+	categoryMapping CategoryMapping
 }
 
 type SplitwiseOptions struct {
-	UserID       *int           `json:"user_id"`
-	ClientKey    string         `json:"client_key"`
-	ClientSecret string         `json:"client_secret"`
-	TokenCache   string         `json:"token_cache"`
-	Categories   []CategorySpec `json:"category_mapping"`
+	UserID          *int            `json:"user_id"`
+	ClientKey       string          `json:"client_key"`
+	ClientSecret    string          `json:"client_secret"`
+	TokenCache      string          `json:"token_cache"`
+	CategoryMapping CategoryMapping `json:"category_mapping"`
 }
 
-type CategorySpec struct {
-	Name string `json:"name"`
+type CategoryMapping map[string]CategoryMappingEntry
 
-	YnabID   string `json:"ynab_id"`
+func (cm *CategoryMapping) Categorize(
+	categories []ynab.Category,
+	expense splitwise.Expense,
+) (string, bool) {
+	ynabCategoriesByName := make(map[string]ynab.Category, len(categories))
+	ynabCategoriesById := make(map[string]ynab.Category, len(categories))
+	for _, c := range categories {
+		ynabCategoriesByName[c.Name] = c
+		ynabCategoriesById[c.Id] = c
+	}
+
+	m, ok := (*cm)[expense.Category.Name]
+	if !ok {
+		return "", false
+	}
+	if m.YnabId != "" {
+		log.Debug().Str("id", m.YnabId).Msg("mapping to ynab ID")
+		ynabCategory, ok := ynabCategoriesById[m.YnabId]
+		if !ok {
+			log.Warn().
+				Str("categoryID", m.YnabId).
+				Msg("unknown YNAB category ID in splitwise mapping")
+			return "", false
+		}
+		return ynabCategory.Id, true
+	}
+	if m.Name != "" {
+		log.Debug().Str("name", m.Name).Msg("mapping to ynab Name")
+		ynabCategory, ok := ynabCategoriesByName[m.Name]
+		if !ok {
+			log.Warn().
+				Str("name", m.Name).
+				Msg("unknown YNAB category name in splitwise mapping")
+			return "", false
+		}
+		return ynabCategory.Id, true
+	}
+	return "", false
+}
+
+func (cm *CategoryMapping) UnmarshalJSON(data []byte) error {
+	m := make(map[string]CategoryMappingEntry)
+	var entries []CategoryMappingEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if _, ok := m[e.Name]; ok {
+			return fmt.Errorf("duplicate mapping entry with name '%s'", e.Name)
+		}
+		m[e.Name] = e
+	}
+	*cm = m
+	return nil
+}
+
+func (cm CategoryMapping) Add(entry CategoryMappingEntry) {
+	cm[entry.Name] = entry
+}
+
+type CategoryMappingEntry struct {
+	Name     string `json:"name"`
 	YnabName string `json:"ynab_name"`
+	YnabId   string `json:"ynab_id"`
 }
 
 func (options *SplitwiseOptions) newSplitwiseClient(ctx context.Context) *splitwise.Client {
@@ -48,7 +110,11 @@ func (options *SplitwiseOptions) newSplitwiseClient(ctx context.Context) *splitw
 		},
 		Path: options.TokenCache,
 	})
-	return splitwise.NewClient(httpClient)
+	return &splitwise.Client{
+		HTTPClient: &LoggingHTTPClient{
+			Client: httpClient,
+		},
+	}
 }
 
 func (options *SplitwiseOptions) NewProvider(ctx context.Context) (TransactionProvider, error) {
@@ -56,31 +122,24 @@ func (options *SplitwiseOptions) NewProvider(ctx context.Context) (TransactionPr
 
 	var userID int
 	if options.UserID == nil {
-		if res, err := client.GetCurrentUser(ctx); err != nil {
-			return nil, err
+		if user, err := client.GetCurrentUser(ctx); err != nil {
+			return nil, fmt.Errorf("get_current_user: %s", err)
 		} else {
-			userID = res.ID
+			userID = user.ID
 		}
 	} else {
 		userID = *options.UserID
 	}
 
-	if len(options.Categories) == 0 {
+	if len(options.CategoryMapping) == 0 {
 		log.Debug().Msg("no category mapping specified")
 	}
-	categories := make(map[string]CategorySpec)
-	for _, spec := range options.Categories {
-		if _, ok := categories[spec.Name]; ok {
-			return nil, fmt.Errorf("duplicate splitwise name in category mapping: %s", spec.Name)
-		}
-		categories[spec.Name] = spec
-	}
-
 	mapping := zerolog.Dict()
-	for key, val := range categories {
-		mapping = mapping.Dict(key, zerolog.Dict().
-			Str("id", val.YnabID).
-			Str("name", val.YnabName),
+	for key, val := range options.CategoryMapping {
+		mapping = mapping.Dict("category mapping", zerolog.Dict().
+			Str("splitwise_name", key).
+			Str("ynab_id", val.YnabId).
+			Str("ynab_name", val.YnabName),
 		)
 	}
 	log.Debug().
@@ -91,9 +150,9 @@ func (options *SplitwiseOptions) NewProvider(ctx context.Context) (TransactionPr
 		Msg("Creating splitwise provider")
 
 	return &SplitwiseTransactionProvider{
-		userID:     userID,
-		categories: categories,
-		client:     client,
+		userID:          userID,
+		categoryMapping: options.CategoryMapping,
+		client:          client,
 	}, nil
 }
 
@@ -117,7 +176,7 @@ func (sts *SplitwiseTransactionProvider) Transactions(ctx context.Context, ynabI
 			if e.DeletedAt != nil {
 				continue
 			}
-			user, rest := partionUsers(e.Users, sts.userID)
+			user, rest := partitionUsers(e.Users, sts.userID)
 			if len(rest) > 1 {
 				return nil, fmt.Errorf("not implemented: multi-user transactions")
 			}
@@ -147,7 +206,7 @@ func (sts *SplitwiseTransactionProvider) Transactions(ctx context.Context, ynabI
 				Date:      ynab.Date(e.CreatedAt.In(time.Local)),
 				ImportId:  &importId,
 			}
-			categoryId, ok := sts.mapCategory(ynabInfo.Categories, e.Category)
+			categoryId, ok := sts.categorize(ynabInfo.Categories, e)
 			if ok {
 				log.Debug().
 					Int("splitwise.category.id", e.Category.ID).
@@ -171,45 +230,21 @@ func (sts *SplitwiseTransactionProvider) Transactions(ctx context.Context, ynabI
 	return transactions, nil
 }
 
-func (sts *SplitwiseTransactionProvider) mapCategory(
+func (sts *SplitwiseTransactionProvider) categorize(
 	ynabCategories []ynab.Category,
-	category splitwise.Category,
+	expense splitwise.Expense,
 ) (string, bool) {
-	ynabCategoriesByName := make(map[string]ynab.Category)
-	ynabCategoriesByID := make(map[string]ynab.Category)
-	for _, c := range ynabCategories {
-		ynabCategoriesByName[c.Name] = c
-		ynabCategoriesByID[c.Id] = c
-	}
-
-	m, ok := sts.categories[category.Name]
-	if !ok {
-		return "", false
-	}
-	if m.YnabID != "" {
-		log.Debug().Str("id", m.YnabID).Msg("mapping to ynab ID")
-		ynabCategory, ok := ynabCategoriesByID[m.YnabID]
-		if !ok {
-			log.Warn().
-				Str("categoryID", m.YnabID).
-				Msg("unknown YNAB category ID in splitwise mapping")
-			return "", false
-		}
-		return ynabCategory.Id, true
-	}
-	if m.Name != "" {
-		log.Debug().Str("name", m.Name).Msg("mapping to ynab Name")
-		ynabCategory, ok := ynabCategoriesByName[m.Name]
-		if !ok {
-			log.Warn().
-				Str("name", m.Name).
-				Msg("unknown YNAB category name in splitwise mapping")
-			return "", false
-		}
-		return ynabCategory.Id, true
+	ynabCatId, ok := sts.categoryMapping.Categorize(ynabCategories, expense)
+	if ok {
+		return ynabCatId, true
 	}
 	return "", false
 }
+
+const (
+	milliunitsPerCent   = 10
+	milliunitsPerDollar = 100 * milliunitsPerCent
+)
 
 func netBalanceToMilliUnits(owed string) (int, error) {
 	split := strings.Split(owed, ".")
@@ -218,22 +253,23 @@ func netBalanceToMilliUnits(owed string) (int, error) {
 	}
 	dollars, err := strconv.Atoi(split[0])
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("dollars: %s", err)
 	}
 	cents, err := strconv.Atoi(split[1])
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("cents: %s", err)
 	}
 	if dollars < 0 {
 		cents *= -1
 	}
+	// account for a trimmed final zero
 	if len(split[1]) == 1 {
 		cents *= 10
 	}
-	return (dollars*100 + cents) * 10, nil
+	return dollars*milliunitsPerDollar + cents*milliunitsPerCent, nil
 }
 
-func partionUsers(users []splitwise.ExpenseUser, userID int) (splitwise.ExpenseUser, []splitwise.ExpenseUser) {
+func partitionUsers(users []splitwise.ExpenseUser, userID int) (splitwise.ExpenseUser, []splitwise.ExpenseUser) {
 	var user splitwise.ExpenseUser
 	var other []splitwise.ExpenseUser
 	for _, u := range users {

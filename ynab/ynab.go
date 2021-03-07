@@ -31,7 +31,7 @@ type ApiError struct {
 }
 
 func (err *ApiError) Error() string {
-	return err.Detail
+	return fmt.Sprintf("api: %s: %s", err.Name, err.Detail)
 }
 
 type BudgetsResponse struct {
@@ -172,7 +172,7 @@ type Account struct {
 }
 
 func (c *Client) Budgets(ctx context.Context) (response BudgetsResponse, err error) {
-	req, err := c.newRequest(ctx, "GET", "budgets", nil)
+	req, err := c.newRequest(ctx, http.MethodGet, "budgets", nil)
 	if err != nil {
 		return
 	}
@@ -182,7 +182,7 @@ func (c *Client) Budgets(ctx context.Context) (response BudgetsResponse, err err
 
 func (c *Client) Accounts(ctx context.Context, budgetID string) (response AccountsResponse, err error) {
 	u := fmt.Sprintf("budgets/%s/accounts", budgetID)
-	req, err := c.newRequest(ctx, "GET", u, nil)
+	req, err := c.newRequest(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return
 	}
@@ -192,7 +192,7 @@ func (c *Client) Accounts(ctx context.Context, budgetID string) (response Accoun
 
 func (c *Client) Account(ctx context.Context, budgetID, accountID string) (response AccountResponse, err error) {
 	u := fmt.Sprintf("budgets/%s/accounts/%s", budgetID, accountID)
-	req, err := c.newRequest(ctx, "GET", u, nil)
+	req, err := c.newRequest(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return
 	}
@@ -215,7 +215,7 @@ func (c *Client) Transactions(ctx context.Context, request TransactionsRequest) 
 	} else {
 		u = fmt.Sprintf("budgets/%s/transactions", request.BudgetID)
 	}
-	req, err := c.newRequest(ctx, "GET", u, &request)
+	req, err := c.newRequest(ctx, http.MethodGet, u, &request)
 	if request.SinceDate.Unix() > 0 {
 		qs := make(url.Values)
 		qs.Add("since_date", request.SinceDate.Format("2006-01-02"))
@@ -230,7 +230,7 @@ func (c *Client) Transactions(ctx context.Context, request TransactionsRequest) 
 
 func (c *Client) CreateTransactions(ctx context.Context, budgetID string, request CreateTransactionsRequest) (response TransactionsResponse, err error) {
 	u := fmt.Sprintf("budgets/%s/transactions", budgetID)
-	req, err := c.newRequest(ctx, "POST", u, &request)
+	req, err := c.newRequest(ctx, http.MethodPost, u, &request)
 	if err != nil {
 		return
 	}
@@ -240,7 +240,7 @@ func (c *Client) CreateTransactions(ctx context.Context, budgetID string, reques
 
 func (c *Client) Categories(ctx context.Context, request CategoriesRequest) (response CategoriesResponse, err error) {
 	u := fmt.Sprintf("budgets/%s/categories", request.BudgetID)
-	req, err := c.newRequest(ctx, "GET", u, &request)
+	req, err := c.newRequest(ctx, http.MethodGet, u, &request)
 	if err != nil {
 		return
 	}
@@ -250,7 +250,7 @@ func (c *Client) Categories(ctx context.Context, request CategoriesRequest) (res
 
 func (c *Client) newRequest(ctx context.Context, method, path string, body interface{}) (*http.Request, error) {
 	var buf io.ReadWriter
-	if body != nil {
+	if method != http.MethodGet && body != nil {
 		buf = &bytes.Buffer{}
 		if err := json.NewEncoder(buf).Encode(body); err != nil {
 			return nil, err

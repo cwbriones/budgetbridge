@@ -17,19 +17,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type NewProvider interface {
-	NewProvider(context.Context) (TransactionProvider, error)
-}
-
-type YnabInfo struct {
-	LastUpdateHint time.Time
-	Categories     []ynab.Category
-}
-
-type TransactionProvider interface {
-	Transactions(context.Context, YnabInfo) ([]ynab.Transaction, error)
-}
-
 func getBudgetID(ctx context.Context, ynabClient *ynab.Client, config Config) (string, error) {
 	if config.BudgetID != nil {
 		return *config.BudgetID, nil
