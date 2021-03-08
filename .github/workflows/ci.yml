@@ -55,8 +55,8 @@ jobs:
       - name: Check go.sum
         run: |
           go mod tidy
-          git diff HEAD
-          if git diff-index HEAD; then
+          git diff ${{ github.sha }}
+          if git diff-index ${{ github.sha }}; then
             echo -e '\e[01;31mgo.mod and/or go.sum was modified.\nRun `go mod tidy` to fix.\e[0m'
             exit 1
           fi
