@@ -35,4 +35,5 @@ jobs:
       - name: Lint
         run: |
           go vet ./...
-          go run honnef.co/go/tools/cmd/staticcheck
+          go install honnef.co/go/tools/cmd/staticcheck@v0.1.2
+          staticcheck
