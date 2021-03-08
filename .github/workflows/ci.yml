@@ -44,9 +44,16 @@ jobs:
           staticcheck
 
       - name: Check go fmt
-        run: if [ "$(go fmt -s -l . | wc -l)" -gt 0 ]; then exit 1; fi
+        run: |
+          if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+            echo -e "\e[01;31mgofmt modified files.\nRun `gofmt -s -w .` to fix.\e[0m"
+            exit 1;
+          fi
 
       - name: Check go.sum
         run: |
           go mod tidy
-          git diff-index --quiet HEAD
+          if git diff-index --quiet HEAD; then
+            echo -e "\e[01;31mgo.mod and/or go.sum was modified.\nRun `go mod tidy` to fix.\e[0m"
+            exit 1
+          fi
