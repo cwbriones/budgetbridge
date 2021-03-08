@@ -12,6 +12,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
+        with:
+          ref: ${{ github.branch }}
 
       - name: Cache go modules
         uses: actions/cache@v2
