@@ -46,14 +46,14 @@ jobs:
       - name: Check go fmt
         run: |
           if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
-            echo -e "\e[01;31mgofmt modified files.\nRun `gofmt -s -w .` to fix.\e[0m"
+            echo -e '\e[01;31mgofmt modified files.\nRun `gofmt -s -w .` to fix.\e[0m'
             exit 1;
           fi
 
       - name: Check go.sum
         run: |
           go mod tidy
-          if git diff-index --quiet HEAD; then
-            echo -e "\e[01;31mgo.mod and/or go.sum was modified.\nRun `go mod tidy` to fix.\e[0m"
+          if git diff-index HEAD; then
+            echo -e '\e[01;31mgo.mod and/or go.sum was modified.\nRun `go mod tidy` to fix.\e[0m'
             exit 1
           fi
