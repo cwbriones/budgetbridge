@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,8 +22,6 @@ var (
 	//
 	// It can be used to check if a response failed because the requested entity did not exist.
 	ErrNotFound = UnexpectedStatus{Status: http.StatusNotFound}
-
-	ErrEndOfQuery = errors.New("end of query")
 )
 
 // Client to the splitwise API.
@@ -253,6 +250,9 @@ func (c *Client) do(
 	}
 	req = req.WithContext(ctx)
 	if body != nil {
+		// FIXME: Can JSON requests be used for everything
+		// instead of having to urlencode some of these payloads?
+
 		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 		req.Header.Add("Content-Length", strconv.Itoa(contentLength))
 	}

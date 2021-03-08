@@ -1,6 +1,7 @@
 package splitwise
 
 import (
+	"context"
 	"errors"
 	"io"
 	"io/ioutil"
@@ -18,23 +19,23 @@ type testcase struct {
 
 	expectedPath string
 	expectedBody map[string][]string
-	f            func(client *Client) error
+	f            func(*Client, context.Context) error
 }
 
 var (
 	testcases = []testcase{
 		{
 			status: 201,
-			mock:   "mocks/create_comment.json",
-			f: func(client *Client) error {
-				_, err := client.CreateComment(123, "hello, world!")
+			mock:   "fixtures/create_comment.json",
+			f: func(client *Client, ctx context.Context) error {
+				_, err := client.CreateComment(ctx, 123, "hello, world!")
 				return err
 			},
 		},
 		{
 			status: 201,
-			mock:   "mocks/create_expense.json",
-			f: func(client *Client) error {
+			mock:   "fixtures/create_expense.json",
+			f: func(client *Client, ctx context.Context) error {
 				repeat := RepeatNever
 				req := CreateExpenseRequest{
 					Cost:           "20.00",
@@ -66,15 +67,15 @@ var (
 						},
 					),
 				}
-				_, err := client.CreateExpense(req)
+				_, err := client.CreateExpense(ctx, req)
 				return err
 			},
 		},
 		{
 			status: 403,
-			mock:   "mocks/auth_error.json",
-			f: func(client *Client) error {
-				_, err := client.CreateComment(123, "hello, world!")
+			mock:   "fixtures/auth_error.json",
+			f: func(client *Client, ctx context.Context) error {
+				_, err := client.CreateComment(ctx, 123, "hello, world!")
 				return err
 			},
 		},
@@ -99,7 +100,7 @@ func TestClient(t *testing.T) {
 	}
 }
 
-func makeRequest(status int, responsePath string, useClient func(client *Client) error) (url.Values, error) {
+func makeRequest(status int, responsePath string, useClient func(*Client, context.Context) error) (url.Values, error) {
 	var capturedValues url.Values
 	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		body, _ := ioutil.ReadAll(r.Body)
@@ -132,7 +133,7 @@ func makeRequest(status int, responsePath string, useClient func(client *Client)
 	client := &Client{
 		&testHTTPClient{u: u},
 	}
-	err = useClient(client)
+	err = useClient(client, context.Background())
 	return capturedValues, err
 }
 

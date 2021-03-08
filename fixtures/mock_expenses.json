@@ -1,0 +1,111 @@
+{
+  "expenses": [
+    {
+      "id": 1,
+      "created_at": "2020-08-09T01:00:31Z",
+      "updated_at": "2020-08-09T01:00:31Z",
+      "deleted_at": null,
+      "category": {
+        "id": 12,
+        "name": "Groceries"
+      }, "cost": "150.0",
+      "description": "Groceries",
+      "users": [
+        {
+          "net_balance": "75.0",
+          "owed_share": "75.0",
+          "paid_share": "150.0",
+          "user_id": 123,
+          "user": {
+            "first_name": "Annie",
+            "id": 123,
+            "last_name": "Edison"
+          }
+        },
+        {
+          "net_balance": "-75.0",
+          "owed_share": "75.0",
+          "paid_share": "0.0",
+          "user_id": 456,
+          "user": {
+            "first_name": "Jeff",
+            "id": 456,
+            "last_name": "Winger"
+          }
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "created_at": "2020-08-03T07:42:21Z",
+      "updated_at": "2020-08-17T07:42:58Z",
+      "deleted_at": null,
+      "category": {
+        "id": 13,
+        "name": "Dining out"
+      },
+      "cost": "31.0",
+      "description": "Dinner",
+      "users": [
+        {
+          "net_balance": "16.5",
+          "owed_share": "16.5",
+          "paid_share": "31.0",
+          "user_id": 123,
+          "user": {
+            "first_name": "Annie",
+            "id": 123,
+            "last_name": "Edison"
+          }
+        },
+        {
+          "net_balance": "-16.5",
+          "owed_share": "16.5",
+          "paid_share": "0.0",
+          "user_id": 456,
+          "user": {
+            "first_name": "Jeff",
+            "id": 456,
+            "last_name": "Winger"
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "created_at": "2020-07-05T03:01:34Z",
+      "updated_at": "2020-07-05T03:01:34Z",
+      "deleted_at": null,
+      "category": {
+        "id": 5,
+        "name": "Electricity"
+      },
+      "cost": "134.04",
+      "description": "Electric Bill",
+      "users": [
+        {
+          "net_balance": "67.02",
+          "owed_share": "67.02",
+          "paid_share": "134.04",
+          "user_id": 456,
+          "user": {
+            "first_name": "Jeff",
+            "id": 456,
+            "last_name": "Winger"
+          }
+        },
+        {
+          "net_balance": "-67.02",
+          "owed_share": "67.02",
+          "paid_share": "0.0",
+          "user_id": 123,
+          "user": {
+            "first_name": "Annie",
+            "id": 123,
+            "last_name": "Edison"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -6,10 +6,11 @@ all: $(TARGET)
 
 $(TARGET): build
 
-lint:
+lint: $(SRC)
 	go run honnef.co/go/tools/cmd/staticcheck
+	go vet
 
-test:
+test: $(SRC)
 	go test -v
 
 build: lint test

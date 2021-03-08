@@ -16,9 +16,13 @@ import (
 	"golang.org/x/oauth2"
 )
 
+type splitwiseClient interface {
+	GetExpenses(context.Context, *splitwise.GetExpensesRequest) ([]splitwise.Expense, error)
+}
+
 type SplitwiseTransactionProvider struct {
 	userID          int
-	client          *splitwise.Client
+	client          splitwiseClient
 	categoryMapping CategoryMapping
 }
 
@@ -58,13 +62,15 @@ func (cm *CategoryMapping) Categorize(
 		}
 		return ynabCategory.Id, true
 	}
-	if m.Name != "" {
-		log.Debug().Str("name", m.Name).Msg("mapping to ynab Name")
-		ynabCategory, ok := ynabCategoriesByName[m.Name]
+	if m.YnabName != "" {
+		log.Debug().Str("name", m.Name).Str("ynab_name", m.YnabName).Msg("mapping to ynab Name")
+		ynabCategory, ok := ynabCategoriesByName[m.YnabName]
 		if !ok {
 			log.Warn().
 				Str("name", m.Name).
+				Str("ynab_name", m.YnabName).
 				Msg("unknown YNAB category name in splitwise mapping")
+			fmt.Printf("%+v\n", ynabCategoriesByName)
 			return "", false
 		}
 		return ynabCategory.Id, true
@@ -203,7 +209,7 @@ func (sts *SplitwiseTransactionProvider) Transactions(ctx context.Context, ynabI
 				PayeeName: rest[0].User.FirstName,
 				Memo:      e.Description,
 				Approved:  false,
-				Date:      ynab.Date(e.CreatedAt.In(time.Local)),
+				Date:      ynab.Date(e.CreatedAt.In(time.UTC)),
 				ImportId:  &importId,
 			}
 			categoryId, ok := sts.categorize(ynabInfo.Categories, e)
