@@ -1,5 +1,9 @@
 on: [push]
 
+defaults:
+  run:
+    shell: bash
+
 name: ci
 jobs:
   build:
