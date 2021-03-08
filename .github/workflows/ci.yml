@@ -16,8 +16,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
-        with:
-          ref: ${{ github.branch }}
 
       - name: Cache go modules
         uses: actions/cache@v2
@@ -61,8 +59,7 @@ jobs:
       - name: Check go.sum
         run: |
           go mod tidy
-          git diff ${{ github.sha }}
-          if git diff-index ${{ github.sha }}; then
+          if ! git diff-index ${{ github.sha }}; then
             echo -e '\e[01;31mgo.mod and/or go.sum was modified.\nRun `go mod tidy` to fix.\e[0m'
             exit 1
           fi
