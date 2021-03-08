@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -16,6 +17,10 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+)
+
+const (
+	ynabCacheName = "ynab_cache.json"
 )
 
 func getBudgetID(ctx context.Context, ynabClient ynabClient, config Config) (string, error) {
@@ -104,22 +109,7 @@ func main() {
 	flag.Parse()
 	flush := initLogging()
 	defer flush()
-	defer func() {
-		if v := recover(); v != nil {
-			var event *zerolog.Event
-			if e, ok := v.(error); ok {
-				event = log.Err(e)
-			} else if e, ok := v.(string); ok {
-				event = log.Error().Str("error", e)
-			}
-			stack := strings.Split(string(debug.Stack()), "\n")
-			event.
-				Str("type", fmt.Sprintf("%T\n", v)).
-				Strs("stack", stack).
-				Msg("exiting due to panic")
-			os.Exit(1)
-		}
-	}()
+	defer defaultPanicHandler()
 
 	var config Config
 	err := config.Providers.SetRegistry(map[string]NewProvider{
@@ -133,7 +123,7 @@ func main() {
 	ctx := context.Background()
 
 	ynabCache := &FileCache{
-		path:          config.Cache.Dir,
+		path:          path.Join(config.Cache.Dir, ynabCacheName),
 		createMissing: config.Cache.CreateMissingDir,
 	}
 	check(ynabCache.Open())
@@ -173,6 +163,22 @@ func main() {
 	}
 	err = bridge.ImportAll(ctx, config)
 	check(err)
+}
+
+func defaultPanicHandler() {
+	if v := recover(); v != nil {
+		var event *zerolog.Event
+		if e, ok := v.(error); ok {
+			event = log.Err(e)
+		} else if e, ok := v.(string); ok {
+			event = log.Error().Str("error", e)
+		}
+		stack := strings.Split(string(debug.Stack()), "\n")
+		event.
+			Str("type", fmt.Sprintf("%T\n", v)).
+			Strs("stack", stack).
+			Msg("exiting due to panic")
+	}
 }
 
 func check(err error) {
