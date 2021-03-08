@@ -42,3 +42,11 @@ jobs:
           go vet ./...
           go install honnef.co/go/tools/cmd/staticcheck@v0.1.2
           staticcheck
+
+      - name: Check go fmt
+        run: if [ "$(go fmt -s -l . | wc -l)" -gt 0 ]; then exit 1; fi
+
+      - name: Check go.sum
+        run: |
+          go mod tidy
+          git diff-index --quiet HEAD
