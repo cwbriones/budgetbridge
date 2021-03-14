@@ -1,0 +1,65 @@
+on: [push]
+
+defaults:
+  run:
+    shell: bash
+
+name: ci
+jobs:
+  build:
+    name: Build + Test
+    strategy:
+      matrix:
+        go-version: [1.16.x]
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Cache go modules
+        uses: actions/cache@v2
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      - name: Build
+        run: go build ./...
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Lint
+        run: |
+          go vet ./...
+          # This temp dir is needed to get around an issue where installation modifies
+          # the local go.mod, since staticcheck does not use go modules.
+          #
+          # It could be removed if staticcheck moved to go modules, but not if this build
+          # ever decides to support versions of go before 1.16
+          #
+          # See https://github.com/golang/go/issues/40276
+          (cd $(mktemp -d); go get honnef.co/go/tools/cmd/staticcheck@v0.1.2)
+          staticcheck
+
+      - name: Check go fmt
+        run: |
+          if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+            echo -e '\e[01;31mgofmt modified files.\nRun `gofmt -s -w .` to fix.\e[0m'
+            exit 1;
+          fi
+
+      - name: Check go.sum
+        run: |
+          go mod tidy
+          if ! git diff-index ${{ github.sha }}; then
+            echo -e '\e[01;31mgo.mod and/or go.sum was modified.\nRun `go mod tidy` to fix.\e[0m'
+            exit 1
+          fi
